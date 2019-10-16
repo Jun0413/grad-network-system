@@ -25,14 +25,13 @@ HttpdServer::HttpdServer(INIReader& t_config)
 }
 
 
+// start TCP server and create a thread for each connection
 void HttpdServer::launch() {
 	auto log = logger();
 
 	log->info("Launching web server");
 	log->info("Port: {}", port);
 	log->info("doc_root: {}", doc_root);
-
-	// Put code here that actually launches your webserver...
 
 	// TODO: where to put these variables
 	int serv_sock, clnt_sock;
@@ -83,7 +82,7 @@ void HttpdServer::launch() {
 		exit(1);
 	}
 
-	while (1) {
+	while (true) {
 
         clnt_addr_len = sizeof(clnt_addr);
         if ((clnt_sock = accept(serv_sock,
@@ -113,6 +112,7 @@ void HttpdServer::launch() {
 }
 
 
+// independent thread to handle a client
 void HttpdServer::handle_client(int clnt_sock) {
 	auto log = logger();
 	log->info("handle client socket: {}", clnt_sock);
@@ -120,7 +120,7 @@ void HttpdServer::handle_client(int clnt_sock) {
 	// where to put this param?
 	const unsigned int MAX_RECV_BUF_SIZE = 4096;
 
-	while (1) {
+	while (true) {
 		std::string req_str;
 		int bytes_recv = 0;
 		// 1. get request string (close if timeout)
@@ -154,14 +154,58 @@ void HttpdServer::handle_client(int clnt_sock) {
 		} while (bytes_recv > 0);
 
 		log->info("receive: {}", req_str);
-		break;
 
-		// 2. validate request string
+		// 2. validate and parse request string (possibly pipelined)
+		std::vector<string> urls = parse_request(req_str);
 
-		// 3. parse request string (possibly pipelined)
+		// 3. locate files (mime types, security, ...)
+		// and send files
+		for (string url : urls) {
+			log->info("retrieving file {}", url);
+			if (is_path_accessible(url)) {
+				char* abs_path = realpath(url.c_str(), NULL);
+				log->info("absolute path: {}", abs_path);
+				int fd = open(abs_path, O_RDONLY);
+				if (fd == -1) {
+					log->error("open() file");
+					continue;
+				}
+				sendfile(clnt_sock, fd, 0, NULL, NULL, 1024);
+				close(fd);
+			}
+		}
 
-		// 4. locate files (mime types, security, ...)
-
-		// 5. sendfile	
+		break; //TODEL
 	}
+}
+
+
+// TODO
+// validate and parse pipelined request string
+// example input:
+// GET / HTTP/1.1\r\n
+// Host: www.cs.ucsd.edu\r\n
+// User-Agent: MyTester v1.0\r\n
+// Cookie: 123\r\n
+// GET /myimg.jpg HTTP/1.1\r\n
+// Host: www.cs.ucsd.edu\r\n
+// User-Agent: MyTester v1.0\r\n
+// Cookie: 123\r\n
+// My-header: mykey0123\r\n
+// \r\n
+std::vector<string> HttpdServer::parse_request(string req_str) {
+	auto log = logger();
+	log->info("parse request {}", req_str);
+	std::vector<string> urls;
+	urls.push_back(doc_root + "/index.html");
+	// urls.push_back(doc_root + "/myhttpd/kitten.jpg");
+	return urls;
+}
+
+// TODO
+// check if there are any ".." in the url
+bool HttpdServer::is_path_accessible(const string path) {
+	auto log = logger();
+	log->info("Path {} is accessible", path);
+	return true;
 }

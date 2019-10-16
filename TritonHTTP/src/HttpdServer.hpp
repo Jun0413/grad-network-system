@@ -7,6 +7,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <string>
 #include <sys/socket.h>
@@ -28,6 +29,10 @@ protected:
 	string doc_root;
 
 	void handle_client(int clnt_sock);
+
+	std::vector<string> parse_request(string req_str);
+
+	bool is_path_accessible(const string path);
 };
 
 #endif // HTTPDSERVER_HPP
