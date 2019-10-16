@@ -122,36 +122,38 @@ void HttpdServer::handle_client(int clnt_sock) {
 
 	while (true) {
 		std::string req_str;
-		int bytes_recv = 0;
+		unsigned int bytes_recv = 0;
 		// 1. get request string (close if timeout)
-		do {
+		while (true) {
 			std::vector<char> buffer(MAX_RECV_BUF_SIZE);
 			bytes_recv = recv(clnt_sock, &buffer[0], buffer.size(), 0);
-			// firstly check if it is timed out
-			if (errno == EAGAIN || errno == EWOULDBLOCK) {
-				log->info("receive time out");
 
-				// TODO
-				// close socket, send back a connection:close
-				// and stop handling this client
-				close(clnt_sock);
-
-				return;
-			}
-			
-			if (bytes_recv == -1) {
-				log->error("receiv()");
-				
+			if (bytes_recv < 0) {
+				// check if it is timed out
+				if (errno == EAGAIN || errno == EWOULDBLOCK) {
+					log->info("receive time out");
+					// TODO
+					// close socket, send back a connection:close
+					// and stop handling this client
+					close(clnt_sock);
+					return;
+				}
+				log->error("recv()");
 				//TODO
 				// close socket, (send error code?)
 				// and stop handling this client
 				close(clnt_sock);
-
 				return;
-			} else {
+			}
+
+			if (bytes_recv != 0) {
 				req_str.append(buffer.cbegin(), buffer.cend());
 			}
-		} while (bytes_recv > 0);
+
+			if (bytes_recv < MAX_RECV_BUF_SIZE) {
+				break;
+			}
+		}
 
 		log->info("receive: {}", req_str);
 

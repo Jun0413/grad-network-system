@@ -65,7 +65,8 @@ int main(void) {
     freeaddrinfo(servinfo);
 
     // 4. send a message
-    if ((ret = send(sockfd, amsg, strlen(amsg), 0)) != strlen(amsg)) {
+    ret = send(sockfd, amsg, strlen(amsg), 0);
+    if (ret != strlen(amsg)) {
         fprintf(stderr, "failed to send PID.\n");
         return 3;
     }
@@ -87,8 +88,8 @@ int main(void) {
             fputs(buf, fp);
         }
     } while (bytes_read > 0);
+    fclose(fp);
 
-    // fclose(fp);
     close(sockfd);
 
     return 0;
