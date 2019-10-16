@@ -172,7 +172,7 @@ void HttpdServer::handle_client(int clnt_sock) {
 					log->error("open() file");
 					continue;
 				}
-				sendfile(clnt_sock, fd, 0, NULL, NULL, 1024);
+				// sendfile(clnt_sock, fd, 0, NULL, NULL, 1024);
 				close(fd);
 			}
 		}
