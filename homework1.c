@@ -105,6 +105,7 @@ int main(void) {
     return 0;
 }
 
+// return the sin_addr (network address)
 void * get_inaddr(struct sockaddr *sa) {
     if (sa->sa_family == AF_INET) {
         return &(((struct sockaddr_in *) sa)->sin_addr);
