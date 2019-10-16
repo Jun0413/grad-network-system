@@ -118,11 +118,11 @@ void HttpdServer::handle_client(int clnt_sock) {
 	log->info("handle client socket: {}", clnt_sock);
 
 	// where to put this param?
-	const unsigned int MAX_RECV_BUF_SIZE = 4096;
+	const int MAX_RECV_BUF_SIZE = 4096;
 
 	while (true) {
 		std::string req_str;
-		unsigned int bytes_recv = 0;
+		int bytes_recv = 0;
 		// 1. get request string (close if timeout)
 		while (true) {
 			std::vector<char> buffer(MAX_RECV_BUF_SIZE);
