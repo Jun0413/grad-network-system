@@ -32,7 +32,7 @@ void HttpdServer::launch() {
 	log->info("Launching web server");
 	log->info("Port: {}", port);
 	log->info("doc_root: {}", doc_root);
-
+	
 	// TODO: where to put these variables
 	int serv_sock, clnt_sock;
 	struct addrinfo hints, *servinfo, *p;
@@ -192,6 +192,30 @@ void HttpdServer::handle_client(int clnt_sock) {
 // validate and parse pipelined request string
 // If valid request, return 200 and store urls into urls vertor
 // Otherwise, return corresponding error code
+// return -1 if "Connection" field is set to -1
+
+// test cases
+// std::vector<std::pair<string, int>> requests = {{"GET / HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", 200}, 
+// 		{"GET /test1.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\nGET /test12.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", 200},
+// 		{"GET /test2.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n", 400},
+// 		{"GET /test3.jpg HTTP/1.1\r\nHst: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", 400},
+// 		{"GET /test4.jpg\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", 400}, 
+// 		{"POST /test5.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", 400},
+// 		{"GET /test6.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nConnection: close\r\nCookie: 123\r\n\r\n", -1}, 
+// 		{"GET /test7.jpg HTTP/1.0\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", 400}, 
+// 		{"GET /test8.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester: v1.0\r\nCookie: 123\r\n\r\n", 400},
+// 		{"GET HTTP/1.0\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", 400}
+// };
+// for(const auto& p: requests){
+// 	std::vector<string> urls;
+// 	int statusCode = parse_request(p.first, urls);
+// 	for(const auto& url : urls){
+// 		log->info("Url: {}", url);
+// 	}
+// 	if(p.second != statusCode){
+// 		log->error("Parse request failed, {}", p.first);
+// 	}
+// }
 
 // example input:
 // GET / HTTP/1.1\r\n
@@ -204,13 +228,62 @@ void HttpdServer::handle_client(int clnt_sock) {
 // Cookie: 123\r\n
 // My-header: mykey0123\r\n
 // \r\n
-int HttpdServer::parse_request(const string& req_str, vector<string>& urls) {
+int HttpdServer::parse_request(const string& req_str, std::vector<string>& urls) {
 	auto log = logger();
-	log->info("parse request {}", req_str);
-	
-
-	urls.push_back(doc_root + "/index.html");
-	// urls.push_back(doc_root + "/myhttpd/kitten.jpg");
+	log->info("Parse request: {}", req_str);
+	std::vector<string> lines = split(req_str, "\r\n");
+	if(lines.size() < 3 || lines[0].substr(0, 3) != "GET" || !lines.back().empty()){
+		// HTTP request should have at least 3 lines, i.e. initial line, host field line and last empyt line
+		log->error("Bad HTTP Request");
+		return 400;
+	}
+	bool hasHostField = false, isNewRequest = true;
+	for(int i = 0; i < (int)lines.size(); i++){
+		const string& line = lines[i];
+		log->info("Processing line: {}", line);
+		if(line.empty()){
+			// previous request ends
+			if(!hasHostField){
+				log->error("No Host field found in the HTTP request");
+				return 400;
+			}
+			hasHostField = false;
+			isNewRequest = true;
+			continue;
+		}
+		if(isNewRequest){
+			auto values = split(line, " ");
+			if(values.size() != 3 || values[0] != "GET" || values[2] != "HTTP/1.1"){
+				log->error("Bad request initial line: {}", line);
+				return 400;
+			}
+			// should we check if url is valid here?
+			urls.push_back(values[1]);
+			isNewRequest = false;
+		}else{
+			auto values = split(line, ":\t");
+			if(values.size() != 2){
+				log->error("Bad request key-value pair: {}", line);
+				for(const auto val : values){
+					log->info("Values: {}", val);
+				}
+				return 400;
+			}
+			if(values[0] == "Host"){
+				hasHostField = true;
+			}else if(values[0] == "Connection"){
+				if(values[1] == "close"){
+					// close connection
+					log->info("Close connection requested by client");
+					// should we check this request has "Host" field here?
+					return -1; // custom code
+				}
+			}
+			// just ignore other request fields
+			// RFC 2616 allows multiple header fields with same name under specific conditions, https://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.2
+			// TritonHTTP specification: "You do not need to support duplicate keys in a single request. So, for example, requests will never have two Host headers"
+		}
+	}
 	return 200;
 }
 
@@ -223,13 +296,21 @@ bool HttpdServer::is_path_accessible(const string path) {
 }
 
 std::vector<string> HttpdServer::split(const string& str, const string& delim){
+	// auto log = logger();
+	// log->info("Split: {}, delim: {}", str, delim);
 	// Split str by delim
 	// Reference: https://stackoverflow.com/a/7408245
 	std::vector<string> res;
-	std::size_t start = 0, end = 0; 
-	while((end = str.find_first_of(delim, start)) != string::npos){
+	std::size_t start = 0, end = 0, searchStart = 0;
+	while((end = str.find_first_of(delim, searchStart)) != string::npos){
+		// log->info("Start: {}, end: {}, str[end]:{}", start, end, (int)str[end]);
+		if(str[end] != delim[0]){
+			// only useful when delim = "\r\n". In Unix system, it will match a single '\n'
+			searchStart = end + 1;
+			continue;
+		}
 		res.push_back(str.substr(start, end - start));
-		start = end + delim.size();
+		searchStart = start = end + delim.size();
 	}
 	if(start < str.size()){
 		res.push_back(str.substr(start));
