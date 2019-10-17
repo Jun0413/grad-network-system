@@ -33,6 +33,7 @@ protected:
 	int parse_request(const string& req_str, std::vector<string>& urls);
 
 	bool is_path_accessible(const string path);
+
 	std::vector<string> split(const string& str, const string& delim);
 };
 
