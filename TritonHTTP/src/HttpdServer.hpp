@@ -30,9 +30,10 @@ protected:
 
 	void handle_client(int clnt_sock);
 
-	std::vector<string> parse_request(string req_str);
+	int parse_request(const string& req_str, vector<string>& urls);
 
 	bool is_path_accessible(const string path);
+	std::vector<string> split(const string& str, const string& delim);
 };
 
 #endif // HTTPDSERVER_HPP

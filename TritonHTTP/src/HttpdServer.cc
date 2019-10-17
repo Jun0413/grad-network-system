@@ -158,7 +158,12 @@ void HttpdServer::handle_client(int clnt_sock) {
 		log->info("receive: {}", req_str);
 
 		// 2. validate and parse request string (possibly pipelined)
-		std::vector<string> urls = parse_request(req_str);
+		std::vector<string> urls;
+		int statusCode = parse_request(req_str, urls);
+		if(statusCode != 200){
+			log->error("Invalid HTTP Request");
+			// TODO
+		}
 
 		// 3. locate files (mime types, security, ...)
 		// and send files
@@ -182,8 +187,12 @@ void HttpdServer::handle_client(int clnt_sock) {
 }
 
 
+
 // TODO
 // validate and parse pipelined request string
+// If valid request, return 200 and store urls into urls vertor
+// Otherwise, return corresponding error code
+
 // example input:
 // GET / HTTP/1.1\r\n
 // Host: www.cs.ucsd.edu\r\n
@@ -195,13 +204,14 @@ void HttpdServer::handle_client(int clnt_sock) {
 // Cookie: 123\r\n
 // My-header: mykey0123\r\n
 // \r\n
-std::vector<string> HttpdServer::parse_request(string req_str) {
+int HttpdServer::parse_request(const string& req_str, vector<string>& urls) {
 	auto log = logger();
 	log->info("parse request {}", req_str);
-	std::vector<string> urls;
+	
+
 	urls.push_back(doc_root + "/index.html");
 	// urls.push_back(doc_root + "/myhttpd/kitten.jpg");
-	return urls;
+	return 200;
 }
 
 // TODO
@@ -210,4 +220,19 @@ bool HttpdServer::is_path_accessible(const string path) {
 	auto log = logger();
 	log->info("Path {} is accessible", path);
 	return true;
+}
+
+std::vector<string> HttpdServer::split(const string& str, const string& delim){
+	// Split str by delim
+	// Reference: https://stackoverflow.com/a/7408245
+	std::vector<string> res;
+	std::size_t start = 0, end = 0; 
+	while((end = str.find_first_of(delim, start)) != string::npos){
+		res.push_back(str.substr(start, end - start));
+		start = end + delim.size();
+	}
+	if(start < str.size()){
+		res.push_back(str.substr(start));
+	}
+	return res;
 }
