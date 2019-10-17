@@ -38,35 +38,6 @@ void HttpdServer::launch() {
 	log->info("Port: {}", port);
 	log->info("doc_root: {}", doc_root);
 	
-	std::vector<std::pair<string, std::vector<int>>> requests = {
-        {"GET / HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200}}, 
-		{"GET /index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\nGET /kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200, 200}},
-		{"GET /index.html HTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\nGET /kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\nGET /kitten0.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400, 200, 404}},
-        {"GET /subdir1/index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200}}, 
-        {"GET /subdir1/../index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200}}, 
-        {"GET /subdir2/../index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {404}}, 
-        {"GET /../kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\n", {404}},
-        {"GET /kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /kitten2.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /UCSD.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /UCSD_Seal.png HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /../kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nConnection: close\r\n\r\n", {200, 404, 404, 200, -404}},      
-        {"GET /kitten0.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n", {404}},
-        {"GET /test3.jpg HTTP/1.1\r\nHst: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400}},
-        {"GET /test4.jpg\r\nHost: www.cs.ucsd.edu\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400}}, 
-        {"POST /test5.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400}}
-	};
-
-	for(const auto& p: requests){
-		std::vector<string> urls;
-		std::vector<int> codes;
-		parse_request(p.first, urls, codes);
-		for(int i = 0; i < (int)codes.size(); i++){
-			if(codes[i] != p.second[i]){
-				log->error("Wrong status code: {}, expected: {}", codes[i], p.second[i]);
-			}
-		}
-		for(const auto& url : urls){
-			log->info("Url: {}", url);
-		}
-	}
-	/*
 	// TODO: where to put these variables
 	int serv_sock, clnt_sock;
 	struct addrinfo hints, *servinfo, *p;
@@ -143,7 +114,6 @@ void HttpdServer::launch() {
     }
 
 	close(serv_sock);
-	*/
 }
 
 
@@ -229,6 +199,36 @@ void HttpdServer::handle_client(int clnt_sock) {
 // If request's connection field set to close, codes set to negative normal status code, store urls into urls vector
 // Otherwise, codes set to corresponding error code (400, 404), the priority is 400 > 404 > 200
 // Assume that requests have correct structure, i.e. every request ended with an empty line (\r\n)
+
+// test cases:
+// std::vector<std::pair<string, std::vector<int>>> requests = {
+// 	{"GET / HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200}}, 
+// 	{"GET /index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\nGET /kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200, 200}},
+// 	{"GET /index.html HTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\nGET /kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\nGET /kitten0.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400, 200, 404}},
+// 	{"GET /subdir1/index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200}}, 
+// 	{"GET /subdir1/../index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200}}, 
+// 	{"GET /subdir2/../index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {404}}, 
+// 	{"GET /../kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\n", {404}},
+// 	{"GET /kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /kitten2.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /UCSD.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /UCSD_Seal.png HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /../kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nConnection: close\r\n\r\n", {200, 404, 404, 200, -404}},      
+// 	{"GET /kitten0.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n", {404}},
+// 	{"GET /test3.jpg HTTP/1.1\r\nHst: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400}},
+// 	{"GET /test4.jpg\r\nHost: www.cs.ucsd.edu\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400}}, 
+// 	{"POST /test5.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400}}
+// };
+
+// for(const auto& p: requests){
+// 	std::vector<string> urls;
+// 	std::vector<int> codes;
+// 	parse_request(p.first, urls, codes);
+// 	for(int i = 0; i < (int)codes.size(); i++){
+// 		if(codes[i] != p.second[i]){
+// 			log->error("Wrong status code: {}, expected: {}", codes[i], p.second[i]);
+// 		}
+// 	}
+// 	for(const auto& url : urls){
+// 		log->info("Url: {}", url);
+// 	}
+// }
 
 // example input:
 // GET / HTTP/1.1\r\n
