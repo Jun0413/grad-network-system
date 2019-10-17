@@ -1,6 +1,5 @@
 #include <sysexits.h>
-
-
+#include <sys/stat.h>
 #include "logger.hpp"
 #include "HttpdServer.hpp"
 
@@ -21,7 +20,13 @@ HttpdServer::HttpdServer(INIReader& t_config)
 		log->error("doc_root was not in the config file");
 		exit(EX_CONFIG);
 	}
-	doc_root = dr;
+	char* realdr = realpath(dr.c_str(), NULL);
+	if(realdr == NULL){
+		log->error("Invalid doc_root: {}", dr);
+		exit(EX_CONFIG);
+	}
+	doc_root = string(realdr);
+	free(realdr);
 }
 
 
@@ -33,6 +38,35 @@ void HttpdServer::launch() {
 	log->info("Port: {}", port);
 	log->info("doc_root: {}", doc_root);
 	
+	std::vector<std::pair<string, std::vector<int>>> requests = {
+        {"GET / HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200}}, 
+		{"GET /index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\nGET /kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200, 200}},
+		{"GET /index.html HTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\nGET /kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\nGET /kitten0.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400, 200, 404}},
+        {"GET /subdir1/index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200}}, 
+        {"GET /subdir1/../index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200}}, 
+        {"GET /subdir2/../index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {404}}, 
+        {"GET /../kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\n", {404}},
+        {"GET /kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /kitten2.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /UCSD.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /UCSD_Seal.png HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /../kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nConnection: close\r\n\r\n", {200, 404, 404, 200, -404}},      
+        {"GET /kitten0.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n", {404}},
+        {"GET /test3.jpg HTTP/1.1\r\nHst: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400}},
+        {"GET /test4.jpg\r\nHost: www.cs.ucsd.edu\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400}}, 
+        {"POST /test5.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400}}
+	};
+
+	for(const auto& p: requests){
+		std::vector<string> urls;
+		std::vector<int> codes;
+		parse_request(p.first, urls, codes);
+		for(int i = 0; i < (int)codes.size(); i++){
+			if(codes[i] != p.second[i]){
+				log->error("Wrong status code: {}, expected: {}", codes[i], p.second[i]);
+			}
+		}
+		for(const auto& url : urls){
+			log->info("Url: {}", url);
+		}
+	}
+	/*
 	// TODO: where to put these variables
 	int serv_sock, clnt_sock;
 	struct addrinfo hints, *servinfo, *p;
@@ -109,6 +143,7 @@ void HttpdServer::launch() {
     }
 
 	close(serv_sock);
+	*/
 }
 
 
@@ -158,29 +193,29 @@ void HttpdServer::handle_client(int clnt_sock) {
 		log->info("receive: {}", req_str);
 
 		// 2. validate and parse request string (possibly pipelined)
-		std::vector<string> urls;
-		int statusCode = parse_request(req_str, urls);
-		if(statusCode != 200){
-			log->error("Invalid HTTP Request");
-			// TODO
-		}
+		// std::vector<string> urls;
+		// int statusCode = parse_request(req_str, urls);
+		// if(statusCode != 200){
+		// 	log->error("Invalid HTTP Request");
+		// 	// TODO
+		// }
 
 		// 3. locate files (mime types, security, ...)
 		// and send files
-		for (string url : urls) {
-			log->info("retrieving file {}", url);
-			if (is_path_accessible(url)) {
-				char* abs_path = realpath(url.c_str(), NULL);
-				log->info("absolute path: {}", abs_path);
-				int fd = open(abs_path, O_RDONLY);
-				if (fd == -1) {
-					log->error("open() file");
-					continue;
-				}
-				// sendfile(clnt_sock, fd, 0, NULL, NULL, 1024);
-				close(fd);
-			}
-		}
+		// for (string url : urls) {
+		// 	log->info("retrieving file {}", url);
+		// 	if (is_path_accessible(url)) {
+		// 		char* abs_path = realpath(url.c_str(), NULL);
+		// 		log->info("absolute path: {}", abs_path);
+		// 		int fd = open(abs_path, O_RDONLY);
+		// 		if (fd == -1) {
+		// 			log->error("open() file");
+		// 			continue;
+		// 		}
+		// 		// sendfile(clnt_sock, fd, 0, NULL, NULL, 1024);
+		// 		close(fd);
+		// 	}
+		// }
 
 		break; //TODEL
 	}
@@ -190,32 +225,10 @@ void HttpdServer::handle_client(int clnt_sock) {
 
 // TODO
 // validate and parse pipelined request string
-// If valid request, return 200 and store urls into urls vertor
-// Otherwise, return corresponding error code
-// return -1 if "Connection" field is set to -1
-
-// test cases
-// std::vector<std::pair<string, int>> requests = {{"GET / HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", 200}, 
-// 		{"GET /test1.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\nGET /test12.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", 200},
-// 		{"GET /test2.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n", 400},
-// 		{"GET /test3.jpg HTTP/1.1\r\nHst: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", 400},
-// 		{"GET /test4.jpg\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", 400}, 
-// 		{"POST /test5.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", 400},
-// 		{"GET /test6.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nConnection: close\r\nCookie: 123\r\n\r\n", -1}, 
-// 		{"GET /test7.jpg HTTP/1.0\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", 400}, 
-// 		{"GET /test8.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester: v1.0\r\nCookie: 123\r\n\r\n", 400},
-// 		{"GET HTTP/1.0\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", 400}
-// };
-// for(const auto& p: requests){
-// 	std::vector<string> urls;
-// 	int statusCode = parse_request(p.first, urls);
-// 	for(const auto& url : urls){
-// 		log->info("Url: {}", url);
-// 	}
-// 	if(p.second != statusCode){
-// 		log->error("Parse request failed, {}", p.first);
-// 	}
-// }
+// If valid requests, codes set to 200 and store urls into urls vertor
+// If request's connection field set to close, codes set to negative normal status code, store urls into urls vector
+// Otherwise, codes set to corresponding error code (400, 404), the priority is 400 > 404 > 200
+// Assume that requests have correct structure, i.e. every request ended with an empty line (\r\n)
 
 // example input:
 // GET / HTTP/1.1\r\n
@@ -228,16 +241,11 @@ void HttpdServer::handle_client(int clnt_sock) {
 // Cookie: 123\r\n
 // My-header: mykey0123\r\n
 // \r\n
-int HttpdServer::parse_request(const string& req_str, std::vector<string>& urls) {
+void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls, std::vector<int>& codes) {
 	auto log = logger();
 	log->info("Parse request: {}", req_str);
 	std::vector<string> lines = split(req_str, "\r\n");
-	if(lines.size() < 3 || lines[0].substr(0, 3) != "GET" || !lines.back().empty()){
-		// HTTP request should have at least 3 lines, i.e. initial line, host field line and last empyt line
-		log->error("Bad HTTP Request");
-		return 400;
-	}
-	bool hasHostField = false, isNewRequest = true;
+	bool hasHostField = false, isNewRequest = true, closeConnection = false;
 	for(int i = 0; i < (int)lines.size(); i++){
 		const string& line = lines[i];
 		log->info("Processing line: {}", line);
@@ -245,29 +253,49 @@ int HttpdServer::parse_request(const string& req_str, std::vector<string>& urls)
 			// previous request ends
 			if(!hasHostField){
 				log->error("No Host field found in the HTTP request");
-				return 400;
+				codes.back() = 400;
+			}
+			if(closeConnection){
+				codes.back() = -codes.back();
+			}
+			if(urls.size() < codes.size()){
+				urls.push_back("");
 			}
 			hasHostField = false;
 			isNewRequest = true;
+			closeConnection = false;
 			continue;
 		}
 		if(isNewRequest){
 			auto values = split(line, " ");
-			if(values.size() != 3 || values[0] != "GET" || values[2] != "HTTP/1.1"){
+			if(values.size() != 3 || values[0] != "GET" || values[1].empty() || values[1][0] != '/' || values[2] != "HTTP/1.1"){
 				log->error("Bad request initial line: {}", line);
-				return 400;
+				urls.push_back("");
+				codes.push_back(400);
+			}else{
+				string path = convert_path(values[1]);
+				if(path.empty()){
+					codes.push_back(404);
+					urls.push_back("");
+				}else{
+					codes.push_back(200);
+					urls.push_back(path);
+				}
 			}
-			// should we check if url is valid here?
-			urls.push_back(values[1]);
 			isNewRequest = false;
 		}else{
+			if(codes.back() == 400){
+				// no need to continue processing this request if status code is already 400
+				continue;
+			}
 			auto values = split(line, ":\t");
 			if(values.size() != 2){
 				log->error("Bad request key-value pair: {}", line);
 				for(const auto val : values){
 					log->info("Values: {}", val);
 				}
-				return 400;
+				codes.back() = 400;
+				continue;
 			}
 			if(values[0] == "Host"){
 				hasHostField = true;
@@ -275,8 +303,7 @@ int HttpdServer::parse_request(const string& req_str, std::vector<string>& urls)
 				if(values[1] == "close"){
 					// close connection
 					log->info("Close connection requested by client");
-					// should we check this request has "Host" field here?
-					return -1; // custom code
+					closeConnection = true;
 				}
 			}
 			// just ignore other request fields
@@ -284,15 +311,37 @@ int HttpdServer::parse_request(const string& req_str, std::vector<string>& urls)
 			// TritonHTTP specification: "You do not need to support duplicate keys in a single request. So, for example, requests will never have two Host headers"
 		}
 	}
-	return 200;
 }
 
-// TODO
-// check if there are any ".." in the url
-bool HttpdServer::is_path_accessible(const string path) {
+// convert relative into absolute path, and check if the path is valid
+// return absolute path if valid, otherwise return empty string
+string HttpdServer::convert_path(string path) {
 	auto log = logger();
-	log->info("Path {} is accessible", path);
-	return true;
+	log->info("Convert path: {}, len = {}", path, path.size());
+	if(path.empty()) return "";
+	if(path == "/"){
+		log->info("Convert path: default path detected");
+		path = "/index.html";
+	}
+	path = doc_root + path;
+	char* abs_path = realpath(path.c_str(), NULL);
+	if(abs_path != NULL){
+		log->info("Converted: {}", abs_path);
+		string ans(abs_path);
+		free(abs_path);
+		if(ans.substr(0, doc_root.size()) != doc_root){
+			// || access(ans.c_str(), F_OK) == -1
+			// file must exist, otherwise realpath() will return NULL
+			// escape root directory
+			return "";
+		}
+		return ans;
+	}else{
+		// realpath() will return NULL if convert failed
+		free(abs_path);
+		return "";
+	}
+	return "";
 }
 
 std::vector<string> HttpdServer::split(const string& str, const string& delim){
