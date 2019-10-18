@@ -20,8 +20,9 @@ HttpdServer::HttpdServer(INIReader& t_config)
 		log->error("doc_root was not in the config file");
 		exit(EX_CONFIG);
 	}
-    
-	char* realdr = realpath(dr.c_str(), NULL);
+    wordexp_t exp_result;
+	wordexp(dr.c_str(), &exp_result, 0);
+	char* realdr = realpath(exp_result.we_wordv[0], NULL);
 	if(realdr == NULL){
 		log->error("Invalid doc_root: {}", dr);
 		exit(EX_CONFIG);
@@ -190,7 +191,7 @@ void HttpdServer::handle_client(int clnt_sock) {
 void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls, std::vector<int>& codes) {
 	auto log = logger();
 	log->info("Parse request: {}", req_str);
-	string error400page = doc_root + "\\error400.html", error404page = doc_root + "\\error404.html";
+	string error400page = doc_root + "/error400.html", error404page = doc_root + "/error404.html";
 	std::vector<string> lines = split(req_str, "\r\n");
 	bool hasHostField = false, isNewRequest = true, closeConnection = false;
 	for(int i = 0; i < (int)lines.size(); i++){
@@ -211,6 +212,9 @@ void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls
 				log->info("End of request, should not occur");
 				urls.push_back(error400page);
 			}
+			if(codes.back() == 400 || codes.back() == -400){
+				break;
+			}
 			hasHostField = false;
 			isNewRequest = true;
 			closeConnection = false;
@@ -222,6 +226,7 @@ void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls
 				log->error("Bad request initial line: {}", line);
 				urls.push_back(error400page);
 				codes.push_back(400);
+				break;
 			}else{
 				string path = convert_path(values[1]);
 				if(path.empty()){
@@ -234,10 +239,6 @@ void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls
 			}
 			isNewRequest = false;
 		}else{
-			if(codes.back() == 400){
-				// no need to continue processing this request if status code is already 400
-				continue;
-			}
 			auto values = split(line, ": ");
 			if(values.size() != 2){
 				log->error("Bad request key-value pair: {}", line);
@@ -246,7 +247,7 @@ void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls
 				}
 				codes.back() = 400;
 				urls.back() = error400page;
-				continue;
+				break;
 			}
 			if(values[0] == "Host"){
 				log->info("Find Host field: {}", values[1]);
@@ -343,7 +344,7 @@ bool HttpdServer::send_response(int clnt_sock, std::vector<int>& status_codes,
 	auto log = logger();
 	if (status_codes.size() != absolute_paths.size()) {
 		log->error("send_response(): vector status_codes and absolute_paths must have same size");
-		return;
+		return true;
 	}
 
 	bool should_close_connection = false;
@@ -351,9 +352,11 @@ bool HttpdServer::send_response(int clnt_sock, std::vector<int>& status_codes,
 		int status_code = status_codes[i];
 		string absolute_path = absolute_paths[i];
 
-		if (status_code < 0) {
+		if (status_code < 0 || status_code == 400) {
 			should_close_connection = true;
-			status_code = -status_code;
+			if (status_code < 0) {
+				status_code = -status_code;
+			}
 		}
 		
 		// get file metadata for response fields

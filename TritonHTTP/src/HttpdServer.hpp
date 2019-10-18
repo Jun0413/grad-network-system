@@ -21,6 +21,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <vector>
+#include <wordexp.h>
 
 
 class HttpdServer {
