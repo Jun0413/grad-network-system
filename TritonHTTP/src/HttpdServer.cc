@@ -1,5 +1,6 @@
 #include <sysexits.h>
 #include <sys/stat.h>
+#include <sys/sendfile.h>
 #include "logger.hpp"
 #include "HttpdServer.hpp"
 
@@ -177,69 +178,35 @@ void HttpdServer::handle_client(int clnt_sock) {
 		int bytes_recv = 0;
 		// 1. get request string (close if timeout)
 		while (true) {
-			std::vector<char> buffer(MAX_RECV_BUF_SIZE);
-			bytes_recv = recv(clnt_sock, &buffer[0], buffer.size(), 0);
+			char buffer[MAX_RECV_BUF_SIZE] = {0};
+			bytes_recv = recv(clnt_sock, buffer, MAX_RECV_BUF_SIZE, 0);
 
-			if (bytes_recv < 0) {
-				// check if it is timed out
-				if (errno == EAGAIN || errno == EWOULDBLOCK) {
-					log->info("receive time out");
-					// TODO: send anything back?
-					close(clnt_sock);
-					return;
-				}
-				log->error("recv()");
-				//TODO: send what kind of response?
+			if (bytes_recv <= 0) {
 				close(clnt_sock);
 				return;
 			}
 
-			if (bytes_recv != 0) {
-				req_str.append(buffer.cbegin(), buffer.cend());
-			}
-
-			if (bytes_recv < MAX_RECV_BUF_SIZE) {
-				break;
+			if (bytes_recv > 0) {
+				req_str.append(buffer, bytes_recv);
+				if (req_str.size() >= 4
+					&& req_str[req_str.size() - 1] == '\n'
+					&& req_str[req_str.size() - 2] == '\r'
+					&& req_str[req_str.size() - 3] == '\n'
+					&& req_str[req_str.size() - 4] == '\r'
+				) break;
 			}
 		}
 
 		log->info("receive: {}", req_str);
 
-		/////// a simple test case that works with client ///////////////
-		// std::vector<int> status_codes;
-		// status_codes.push_back(200);
-		// std::vector<std::string> absolute_paths;
-		// absolute_paths.push_back("<CHANGE_THIS_TO_ABSOLUTE_PATH_OF_A_FILE>");
-		// send_response(clnt_sock, status_codes, absolute_paths);
-		// continue;
-		///////////////////////////////////////////////
-
 		// 2. validate and parse request string (possibly pipelined)
-		// std::vector<string> urls;
-		// int statusCode = parse_request(req_str, urls);
-		// if(statusCode != 200){
-		// 	log->error("Invalid HTTP Request");
-		// 	// TODO
-		// }
+		std::vector<string> urls;
+		std::vector<int> status_codes;
+		parse_request(req_str, urls, status_codes);
 
 		// 3. locate files (mime types, security, ...)
 		// and send files
-		// for (string url : urls) {
-		// 	log->info("retrieving file {}", url);
-		// 	if (is_path_accessible(url)) {
-		// 		char* abs_path = realpath(url.c_str(), NULL);
-		// 		log->info("absolute path: {}", abs_path);
-		// 		int fd = open(abs_path, O_RDONLY);
-		// 		if (fd == -1) {
-		// 			log->error("open() file");
-		// 			continue;
-		// 		}
-		// 		// sendfile(clnt_sock, fd, 0, NULL, NULL, 1024);
-		// 		close(fd);
-		// 	}
-		// }
-
-		break; //TODEL
+		send_response(clnt_sock, status_codes, urls);
 	}
 }
 
@@ -300,7 +267,7 @@ void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls
 	bool hasHostField = false, isNewRequest = true, closeConnection = false;
 	for(int i = 0; i < (int)lines.size(); i++){
 		const string& line = lines[i];
-		log->info("Processing line: {}", line);
+		log->info("Processing line: {}, len = {}", line, line.size());
 		if(line.empty()){
 			// previous request ends
 			if(!hasHostField){
@@ -340,7 +307,7 @@ void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls
 				// no need to continue processing this request if status code is already 400
 				continue;
 			}
-			auto values = split(line, ":\t");
+			auto values = split(line, ": ");
 			if(values.size() != 2){
 				log->error("Bad request key-value pair: {}", line);
 				for(const auto val : values){
@@ -350,6 +317,7 @@ void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls
 				continue;
 			}
 			if(values[0] == "Host"){
+				log->info("Find Host field: {}", values[1]);
 				hasHostField = true;
 			}else if(values[0] == "Connection"){
 				if(values[1] == "close"){
@@ -361,6 +329,16 @@ void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls
 			// just ignore other request fields
 			// RFC 2616 allows multiple header fields with same name under specific conditions, https://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.2
 			// TritonHTTP specification: "You do not need to support duplicate keys in a single request. So, for example, requests will never have two Host headers"
+		}
+	}
+	if(!isNewRequest){
+		// last requestv is not full
+		if(urls.size() < codes.size()){
+			urls.push_back("");
+		}
+		if(!codes.empty()){
+			urls.back() = "";
+			codes.back() = 400;
 		}
 	}
 }
@@ -405,7 +383,15 @@ std::vector<string> HttpdServer::split(const string& str, const string& delim){
 	std::size_t start = 0, end = 0, searchStart = 0;
 	while((end = str.find_first_of(delim, searchStart)) != string::npos){
 		// log->info("Start: {}, end: {}, str[end]:{}", start, end, (int)str[end]);
-		if(str[end] != delim[0]){
+		bool matched = true;
+		int i = end;
+		for(; i < (int)str.size() && i < (int)(end + delim.size()); i++){
+			if(str[i] != delim[i-end]){
+				matched = false;
+				break;
+			}
+		}
+		if(!matched && i != (int)(end + delim.size())){
 			// only useful when delim = "\r\n". In Unix system, it will match a single '\n'
 			searchStart = end + 1;
 			continue;
@@ -484,9 +470,8 @@ void HttpdServer::send_response(int clnt_sock, std::vector<int>& status_codes,
 		const char* header_buffer = header.c_str();
 		send(clnt_sock, header_buffer, strlen(header_buffer), 0);
 		// then, send the file
-		off_t sf_len = 0;
 		// TODO: sendfile() below is platform dependent
-		if (sendfile(fd, clnt_sock, 0, &sf_len, nullptr, 0) == -1) {
+		if (sendfile(clnt_sock, fd, NULL, f_size) == -1) {
 			log->error("sendfile(): unsuccessful");
 			close(fd);
 			continue;

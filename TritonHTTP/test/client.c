@@ -11,7 +11,7 @@
 
 #define AMSG "a message"
 #define PORT "8080"
-#define FILE_NAME "response"
+#define FILE_NAME "response.png"
 
 #define CHUNKBYTES 512
 
@@ -73,7 +73,7 @@ int main(void) {
 
     // 5. receive file from server chunk by chunk
     printf("Receiving file... \n");
-    fp = fopen(FILE_NAME, "w");
+    fp = fopen(FILE_NAME, "wb");
     do {
         char buf[CHUNKBYTES];
         bytes_read = recv(sockfd, buf, CHUNKBYTES - 1, 0);
