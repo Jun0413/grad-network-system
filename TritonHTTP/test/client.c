@@ -11,7 +11,7 @@
 
 #define AMSG "a message"
 #define PORT "8080"
-#define FILE_NAME "index.html"
+#define FILE_NAME "response"
 
 #define CHUNKBYTES 512
 

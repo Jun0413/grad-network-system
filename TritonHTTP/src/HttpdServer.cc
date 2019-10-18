@@ -9,6 +9,9 @@ HttpdServer::HttpdServer(INIReader& t_config)
 	: config(t_config) {
 	auto log = logger();
 
+	// load configs
+	// TODO: wrap in a function?
+	log->info("Loading configs...");
 	std::string pstr = config.Get("httpd", "port", "");
 	if (pstr == "") {
 		log->error("port was not in the config file");
@@ -22,6 +25,50 @@ HttpdServer::HttpdServer(INIReader& t_config)
 		exit(EX_CONFIG);
 	}
 	doc_root = dr;
+
+	std::string mmtype = config.Get("httpd", "mime_types", "");
+	if (mmtype == "") {
+		log->error("mime_types was not in the config file");
+		exit(EX_CONFIG);
+	}
+	mime_types_file = mmtype;
+
+	std::string servname = config.Get("httpd", "server_name", "");
+	if (servname == "") {
+		log->error("server_name was not in the config file");
+		exit(EX_CONFIG);
+	}
+	server_name = servname;
+
+	std::string s200msg = config.Get("httpd", "status_200_message", "");
+	if (s200msg == "") {
+		log->error("status_200_message was not in the config file");
+		exit(EX_CONFIG);
+	}
+	status_200_message = s200msg;
+
+	std::string s400msg = config.Get("httpd", "status_400_message", "");
+	if (s400msg == "") {
+		log->error("status_400_message was not in the config file");
+		exit(EX_CONFIG);
+	}
+	status_400_message = s400msg;
+
+	std::string s404msg = config.Get("httpd", "status_404_message", "");
+	if (s404msg == "") {
+		log->error("status_404_message was not in the config file");
+		exit(EX_CONFIG);
+	}
+	status_404_message = s404msg;
+
+	log->info("Server Name: {}", server_name);
+	log->info("Mime Types File: {}", mime_types_file);
+	log->info("Message of HTTP 200: {}", status_200_message);
+	log->info("Message of HTTP 400: {}", status_400_message);
+	log->info("Message of HTTP 404: {}", status_404_message);
+
+	// construct mapping from .ext to mime_type
+	load_mime_types();
 }
 
 
@@ -33,7 +80,7 @@ void HttpdServer::launch() {
 	log->info("Port: {}", port);
 	log->info("doc_root: {}", doc_root);
 	
-	// TODO: where to put these variables
+	// TODO: where to put these variables?
 	int serv_sock, clnt_sock;
 	struct addrinfo hints, *servinfo, *p;
 	int rv;
@@ -93,7 +140,6 @@ void HttpdServer::launch() {
 
 		log->info("accept client {}", inet_ntoa(clnt_addr.sin_addr));
 
-		// TODO: set timeout
 		struct timeval timeout;
 		timeout.tv_sec = 5;
 		timeout.tv_usec = 0;
@@ -117,7 +163,7 @@ void HttpdServer::handle_client(int clnt_sock) {
 	auto log = logger();
 	log->info("handle client socket: {}", clnt_sock);
 
-	// where to put this param?
+	// TODO: where to put this param?
 	const int MAX_RECV_BUF_SIZE = 4096;
 
 	while (true) {
@@ -132,16 +178,12 @@ void HttpdServer::handle_client(int clnt_sock) {
 				// check if it is timed out
 				if (errno == EAGAIN || errno == EWOULDBLOCK) {
 					log->info("receive time out");
-					// TODO
-					// close socket, send back a connection:close
-					// and stop handling this client
+					// TODO: send anything back?
 					close(clnt_sock);
 					return;
 				}
 				log->error("recv()");
-				//TODO
-				// close socket, (send error code?)
-				// and stop handling this client
+				//TODO: send what kind of response?
 				close(clnt_sock);
 				return;
 			}
@@ -156,6 +198,15 @@ void HttpdServer::handle_client(int clnt_sock) {
 		}
 
 		log->info("receive: {}", req_str);
+
+		/////// a simple test case that works with client ///////////////
+		// std::vector<int> status_codes;
+		// status_codes.push_back(200);
+		// std::vector<std::string> absolute_paths;
+		// absolute_paths.push_back("<CHANGE_THIS_TO_ABSOLUTE_PATH_OF_A_FILE>");
+		// send_response(clnt_sock, status_codes, absolute_paths);
+		// continue;
+		///////////////////////////////////////////////
 
 		// 2. validate and parse request string (possibly pipelined)
 		std::vector<string> urls;
@@ -288,7 +339,7 @@ int HttpdServer::parse_request(const string& req_str, std::vector<string>& urls)
 }
 
 // TODO
-// check if there are any ".." in the url
+// check if 1. path exists 2. path is accessible
 bool HttpdServer::is_path_accessible(const string path) {
 	auto log = logger();
 	log->info("Path {} is accessible", path);
@@ -316,4 +367,102 @@ std::vector<string> HttpdServer::split(const string& str, const string& delim){
 		res.push_back(str.substr(start));
 	}
 	return res;
+}
+
+// negative status codes indicate close connection after processing
+// absolute paths all must be valid
+void HttpdServer::send_response(int clnt_sock, std::vector<int>& status_codes,
+    std::vector<std::string>& absolute_paths) {
+	
+	auto log = logger();
+	if (status_codes.size() != absolute_paths.size()) {
+		log->error("send_response(): vector status_codes and absolute_paths must have same size");
+		return;
+	}
+
+	bool should_close_connection = false;
+	for (unsigned long i = 0; i < status_codes.size(); i++) {
+		int status_code = status_codes[i];
+		string absolute_path = absolute_paths[i];
+
+		if (status_code < 0) {
+			should_close_connection = true;
+			status_code = -status_code;
+		}
+		
+		// get file metadata for response fields
+		struct stat f_attrb;
+		stat(absolute_path.c_str(), &f_attrb);
+		size_t f_size = f_attrb.st_size;
+		char f_datetime[40] = {0};
+        strftime(f_datetime, 40, "%a, %d %b %y %T %z", localtime(&f_attrb.st_mtime));
+
+		auto last_dot_pos = absolute_path.find_last_of(".");
+		if (last_dot_pos == string::npos) last_dot_pos = absolute_path.size();
+		auto last_slash_pos = absolute_path.find_last_of("/"); // TODO: escape?
+		string f_name = absolute_path.substr(last_slash_pos + 1, last_dot_pos);
+		string f_ext = absolute_path.substr(last_dot_pos);
+		
+		log->info("File size: {}", f_size);
+		log->info("File last modified date: {}", std::string(f_datetime));
+		log->info("File name: {}", f_name);
+		log->info("File extension: {}", f_ext);
+
+		// construct the header
+		std::string header = "HTTP/1.1";
+		if (status_code == 200) {
+			header += " " + std::to_string(status_code) + " " + status_200_message + "\r\n";
+		} else if (status_code == 400) {
+			header += " " + std::to_string(status_code) + " " + status_400_message + "\r\n";
+		} else if (status_code == 404) {
+			header += " " + std::to_string(status_code) + " " + status_404_message + "\r\n";
+		}
+		header += "Server: " + server_name + "\r\n";
+		header += "Last-Modified: " + std::string(f_datetime) + "\r\n";
+		header += "Content-Length: " + std::to_string(f_size) + "\r\n";
+		header += "Content-Type: ";
+		if (to_mime.find(f_ext) == to_mime.end()) header += "application/octet-stream\r\n\r\n";
+		else header += to_mime[f_ext] + "\r\n\r\n";
+
+		// TODO: reliability && limit of sendfile()?
+		int fd = open(absolute_path.c_str(), O_RDONLY);
+		if (fd == -1) { // should not happen
+			log->error("open() file {}", absolute_path);
+			continue;
+		}
+		// first, send header all at one time
+		const char* header_buffer = header.c_str();
+		send(clnt_sock, header_buffer, strlen(header_buffer), 0);
+		// then, send the file
+		off_t sf_len = 0;
+		// TODO: sendfile() below is platform dependent
+		if (sendfile(fd, clnt_sock, 0, &sf_len, nullptr, 0) == -1) {
+			log->error("sendfile(): unsuccessful");
+			close(fd);
+			continue;
+		}
+		close(fd);
+
+		if (should_close_connection) {
+			close(clnt_sock);
+			return;
+		}
+	}
+}
+
+
+// load mime type file into a map, config exit if error
+// e.g. ".jpg" -> "image/jpeg"
+void HttpdServer::load_mime_types() {
+	auto log = logger();
+	std::string line;
+	std::ifstream in_file(mime_types_file);
+	if (!in_file.good()) {
+		log->error("Mime type file {} not found", mime_types_file);
+		exit(EX_CONFIG);
+	}
+	while (getline(in_file, line)) {
+		std::vector<string> pair_ = split(line, " ");
+		to_mime[pair_[0]] = pair_[1];
+	}
 }
