@@ -12,6 +12,8 @@
 #include <map>
 #include <netdb.h>
 #include <string>
+#include <sysexits.h>
+#include <sys/sendfile.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -32,10 +34,6 @@ protected:
 	string port;
 	string doc_root;
 	string mime_types_file;
-	string server_name;
-	string status_200_message;
-	string status_400_message;
-	string status_404_message;
 
 	std::map<string, string> to_mime;
 

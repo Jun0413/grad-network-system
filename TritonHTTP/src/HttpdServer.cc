@@ -1,6 +1,3 @@
-#include <sysexits.h>
-#include <sys/stat.h>
-#include <sys/sendfile.h>
 #include "logger.hpp"
 #include "HttpdServer.hpp"
 
@@ -10,7 +7,6 @@ HttpdServer::HttpdServer(INIReader& t_config)
 	auto log = logger();
 
 	// load configs
-	// TODO: wrap in a function?
 	log->info("Loading configs...");
 	std::string pstr = config.Get("httpd", "port", "");
 	if (pstr == "") {
@@ -40,39 +36,7 @@ HttpdServer::HttpdServer(INIReader& t_config)
 	}
 	mime_types_file = mmtype;
 
-	std::string servname = config.Get("httpd", "server_name", "");
-	if (servname == "") {
-		log->error("server_name was not in the config file");
-		exit(EX_CONFIG);
-	}
-	server_name = servname;
-
-	std::string s200msg = config.Get("httpd", "status_200_message", "");
-	if (s200msg == "") {
-		log->error("status_200_message was not in the config file");
-		exit(EX_CONFIG);
-	}
-	status_200_message = s200msg;
-
-	std::string s400msg = config.Get("httpd", "status_400_message", "");
-	if (s400msg == "") {
-		log->error("status_400_message was not in the config file");
-		exit(EX_CONFIG);
-	}
-	status_400_message = s400msg;
-
-	std::string s404msg = config.Get("httpd", "status_404_message", "");
-	if (s404msg == "") {
-		log->error("status_404_message was not in the config file");
-		exit(EX_CONFIG);
-	}
-	status_404_message = s404msg;
-
-	log->info("Server Name: {}", server_name);
 	log->info("Mime Types File: {}", mime_types_file);
-	log->info("Message of HTTP 200: {}", status_200_message);
-	log->info("Message of HTTP 400: {}", status_400_message);
-	log->info("Message of HTTP 404: {}", status_404_message);
 
 	// construct mapping from .ext to mime_type
 	load_mime_types();
@@ -86,8 +50,7 @@ void HttpdServer::launch() {
 	log->info("Launching web server");
 	log->info("Port: {}", port);
 	log->info("doc_root: {}", doc_root);
-	
-	// TODO: where to put these variables?
+
 	int serv_sock, clnt_sock;
 	struct addrinfo hints, *servinfo, *p;
 	int rv;
@@ -170,7 +133,6 @@ void HttpdServer::handle_client(int clnt_sock) {
 	auto log = logger();
 	log->info("handle client socket: {}", clnt_sock);
 
-	// TODO: where to put this param?
 	const int MAX_RECV_BUF_SIZE = 4096;
 
 	while (true) {
@@ -180,6 +142,13 @@ void HttpdServer::handle_client(int clnt_sock) {
 		while (true) {
 			char buffer[MAX_RECV_BUF_SIZE] = {0};
 			bytes_recv = recv(clnt_sock, buffer, MAX_RECV_BUF_SIZE, 0);
+
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				log->info("recv() timed out");
+				if (req_str.size() > 0) break;
+				close(clnt_sock);
+				return;
+			}
 
 			if (bytes_recv <= 0) {
 				close(clnt_sock);
@@ -204,12 +173,10 @@ void HttpdServer::handle_client(int clnt_sock) {
 		std::vector<int> status_codes;
 		parse_request(req_str, urls, status_codes);
 
-		// 3. locate files (mime types, security, ...)
-		// and send files
+		// 3. retrieve files and send files
 		send_response(clnt_sock, status_codes, urls);
 	}
 }
-
 
 
 // validate and parse pipelined request string
@@ -217,48 +184,6 @@ void HttpdServer::handle_client(int clnt_sock) {
 // If request's connection field set to close, codes set to negative normal status code, store urls into urls vector
 // Otherwise, codes set to corresponding error code (400, 404), the priority is 400 > 404 > 200
 // Assume that requests have correct structure, i.e. every request ended with an empty line (\r\n)
-
-// test cases:
-// std::vector<std::pair<string, std::vector<int>>> requests = {
-// 	{"GET / HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200}}, 
-// 	{"GET /index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\nGET /kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200, 200}},
-// 	{"GET /index.html HTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\nGET /kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\nGET /kitten0.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400, 200, 404}},
-// 	{"GET /subdir1/index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200}}, 
-// 	{"GET /subdir1/../index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {200}}, 
-// 	{"GET /subdir2/../index.html HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {404}}, 
-// 	{"GET /../kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\n", {404}},
-// 	{"GET /kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /kitten2.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /UCSD.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /UCSD_Seal.png HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\n\r\nGET /../kitten.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nConnection: close\r\n\r\n", {200, 404, 404, 200, -404}},      
-// 	{"GET /kitten0.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n", {404}},
-// 	{"GET /test3.jpg HTTP/1.1\r\nHst: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400}},
-// 	{"GET /test4.jpg\r\nHost: www.cs.ucsd.edu\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400}}, 
-// 	{"POST /test5.jpg HTTP/1.1\r\nHost: www.cs.ucsd.edu\r\nUser-Agent: MyTester v1.0\r\nCookie: 123\r\n\r\n", {400}}
-// };
-
-// for(const auto& p: requests){
-// 	std::vector<string> urls;
-// 	std::vector<int> codes;
-// 	parse_request(p.first, urls, codes);
-// 	for(int i = 0; i < (int)codes.size(); i++){
-// 		if(codes[i] != p.second[i]){
-// 			log->error("Wrong status code: {}, expected: {}", codes[i], p.second[i]);
-// 		}
-// 	}
-// 	for(const auto& url : urls){
-// 		log->info("Url: {}", url);
-// 	}
-// }
-
-// example input:
-// GET / HTTP/1.1\r\n
-// Host: www.cs.ucsd.edu\r\n
-// User-Agent: MyTester v1.0\r\n
-// Cookie: 123\r\n
-// GET /myimg.jpg HTTP/1.1\r\n
-// Host: www.cs.ucsd.edu\r\n
-// User-Agent: MyTester v1.0\r\n
-// Cookie: 123\r\n
-// My-header: mykey0123\r\n
-// \r\n
 void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls, std::vector<int>& codes) {
 	auto log = logger();
 	log->info("Parse request: {}", req_str);
@@ -448,13 +373,13 @@ void HttpdServer::send_response(int clnt_sock, std::vector<int>& status_codes,
 		// construct the header
 		std::string header = "HTTP/1.1";
 		if (status_code == 200) {
-			header += " " + std::to_string(status_code) + " " + status_200_message + "\r\n";
+			header += " " + std::to_string(status_code) + " OK\r\n";
 		} else if (status_code == 400) {
-			header += " " + std::to_string(status_code) + " " + status_400_message + "\r\n";
+			header += " " + std::to_string(status_code) + " Bad Request\r\n";
 		} else if (status_code == 404) {
-			header += " " + std::to_string(status_code) + " " + status_404_message + "\r\n";
+			header += " " + std::to_string(status_code) + " Not Found\r\n";
 		}
-		header += "Server: " + server_name + "\r\n";
+		header += "Server: TritonServer 1.0\r\n";
 		header += "Last-Modified: " + std::string(f_datetime) + "\r\n";
 		header += "Content-Length: " + std::to_string(f_size) + "\r\n";
 		header += "Content-Type: ";
