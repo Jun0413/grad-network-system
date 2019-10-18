@@ -41,10 +41,9 @@ protected:
 
 	void handle_client(int clnt_sock);
 
-	int parse_request(const string& req_str, std::vector<string>& urls);
+	void parse_request(const string& req_str, std::vector<string>& urls, std::vector<int>& codes);
 
-	bool is_path_accessible(const string path);
-
+	string convert_path(string path);
 	std::vector<string> split(const string& str, const string& delim);
 
 	void send_response(int clnt_sock, std::vector<int>& status_codes, std::vector<std::string>& absolute_paths);
