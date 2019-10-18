@@ -212,7 +212,6 @@ void HttpdServer::handle_client(int clnt_sock) {
 
 
 
-// TODO
 // validate and parse pipelined request string
 // If valid requests, codes set to 200 and store urls into urls vertor
 // If request's connection field set to close, codes set to negative normal status code, store urls into urls vector
@@ -263,6 +262,7 @@ void HttpdServer::handle_client(int clnt_sock) {
 void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls, std::vector<int>& codes) {
 	auto log = logger();
 	log->info("Parse request: {}", req_str);
+	string error400page = doc_root + "\\error400.html", error404page = doc_root + "\\error404.html";
 	std::vector<string> lines = split(req_str, "\r\n");
 	bool hasHostField = false, isNewRequest = true, closeConnection = false;
 	for(int i = 0; i < (int)lines.size(); i++){
@@ -273,12 +273,15 @@ void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls
 			if(!hasHostField){
 				log->error("No Host field found in the HTTP request");
 				codes.back() = 400;
+				urls.back() = error400page;
 			}
 			if(closeConnection){
 				codes.back() = -codes.back();
 			}
 			if(urls.size() < codes.size()){
-				urls.push_back("");
+				// should not enter here
+				log->info("End of request, should not occur");
+				urls.push_back(error400page);
 			}
 			hasHostField = false;
 			isNewRequest = true;
@@ -289,13 +292,13 @@ void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls
 			auto values = split(line, " ");
 			if(values.size() != 3 || values[0] != "GET" || values[1].empty() || values[1][0] != '/' || values[2] != "HTTP/1.1"){
 				log->error("Bad request initial line: {}", line);
-				urls.push_back("");
+				urls.push_back(error400page);
 				codes.push_back(400);
 			}else{
 				string path = convert_path(values[1]);
 				if(path.empty()){
 					codes.push_back(404);
-					urls.push_back("");
+					urls.push_back(error404page);
 				}else{
 					codes.push_back(200);
 					urls.push_back(path);
@@ -314,6 +317,7 @@ void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls
 					log->info("Values: {}", val);
 				}
 				codes.back() = 400;
+				urls.back() = error400page;
 				continue;
 			}
 			if(values[0] == "Host"){
@@ -337,7 +341,7 @@ void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls
 			urls.push_back("");
 		}
 		if(!codes.empty()){
-			urls.back() = "";
+			urls.back() = error400page;
 			codes.back() = 400;
 		}
 	}
@@ -375,14 +379,11 @@ string HttpdServer::convert_path(string path) {
 }
 
 std::vector<string> HttpdServer::split(const string& str, const string& delim){
-	// auto log = logger();
-	// log->info("Split: {}, delim: {}", str, delim);
 	// Split str by delim
 	// Reference: https://stackoverflow.com/a/7408245
 	std::vector<string> res;
 	std::size_t start = 0, end = 0, searchStart = 0;
 	while((end = str.find_first_of(delim, searchStart)) != string::npos){
-		// log->info("Start: {}, end: {}, str[end]:{}", start, end, (int)str[end]);
 		bool matched = true;
 		int i = end;
 		for(; i < (int)str.size() && i < (int)(end + delim.size()); i++){
@@ -392,7 +393,7 @@ std::vector<string> HttpdServer::split(const string& str, const string& delim){
 			}
 		}
 		if(!matched && i != (int)(end + delim.size())){
-			// only useful when delim = "\r\n". In Unix system, it will match a single '\n'
+			// portability problem under different platforms, e.g. "\r\n"
 			searchStart = end + 1;
 			continue;
 		}
@@ -435,7 +436,7 @@ void HttpdServer::send_response(int clnt_sock, std::vector<int>& status_codes,
 
 		auto last_dot_pos = absolute_path.find_last_of(".");
 		if (last_dot_pos == string::npos) last_dot_pos = absolute_path.size();
-		auto last_slash_pos = absolute_path.find_last_of("/"); // TODO: escape?
+		auto last_slash_pos = absolute_path.find_last_of("/");
 		string f_name = absolute_path.substr(last_slash_pos + 1, last_dot_pos);
 		string f_ext = absolute_path.substr(last_dot_pos);
 		
