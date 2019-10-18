@@ -174,7 +174,10 @@ void HttpdServer::handle_client(int clnt_sock) {
 		parse_request(req_str, urls, status_codes);
 
 		// 3. retrieve files and send files
-		send_response(clnt_sock, status_codes, urls);
+		if(send_response(clnt_sock, status_codes, urls)) {
+			close(clnt_sock);
+			return;
+		}
 	}
 }
 
@@ -333,7 +336,8 @@ std::vector<string> HttpdServer::split(const string& str, const string& delim){
 
 // negative status codes indicate close connection after processing
 // absolute paths all must be valid
-void HttpdServer::send_response(int clnt_sock, std::vector<int>& status_codes,
+// return true if the connection should be closed
+bool HttpdServer::send_response(int clnt_sock, std::vector<int>& status_codes,
     std::vector<std::string>& absolute_paths) {
 	
 	auto log = logger();
@@ -404,11 +408,10 @@ void HttpdServer::send_response(int clnt_sock, std::vector<int>& status_codes,
 		}
 		close(fd);
 
-		if (should_close_connection) {
-			close(clnt_sock);
-			return;
-		}
+		if (should_close_connection) return true;
 	}
+
+	return false;
 }
 
 

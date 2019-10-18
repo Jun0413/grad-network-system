@@ -44,7 +44,7 @@ protected:
 	string convert_path(string path);
 	std::vector<string> split(const string& str, const string& delim);
 
-	void send_response(int clnt_sock, std::vector<int>& status_codes, std::vector<std::string>& absolute_paths);
+	bool send_response(int clnt_sock, std::vector<int>& status_codes, std::vector<std::string>& absolute_paths);
 
 	void load_mime_types();
 };
