@@ -191,7 +191,7 @@ void HttpdServer::handle_client(int clnt_sock) {
 void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls, std::vector<int>& codes) {
 	auto log = logger();
 	log->info("Parse request: {}", req_str);
-	string error400page = doc_root + "/error400.html", error404page = doc_root + "/error404.html";
+	string error400page = "./error400.html", error404page = "./error404.html";
 	std::vector<string> lines = split(req_str, "\r\n");
 	bool hasHostField = false, isNewRequest = true, closeConnection = false;
 	for(int i = 0; i < (int)lines.size(); i++){
@@ -382,7 +382,7 @@ bool HttpdServer::send_response(int clnt_sock, std::vector<int>& status_codes,
 		if (status_code == 200) {
 			header += " " + std::to_string(status_code) + " OK\r\n";
 		} else if (status_code == 400) {
-			header += " " + std::to_string(status_code) + " Bad Request\r\n";
+			header += " " + std::to_string(status_code) + " Client Error\r\n";
 		} else if (status_code == 404) {
 			header += " " + std::to_string(status_code) + " Not Found\r\n";
 		}
