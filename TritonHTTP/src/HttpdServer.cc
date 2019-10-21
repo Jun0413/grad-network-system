@@ -390,8 +390,10 @@ bool HttpdServer::send_response(int clnt_sock, std::vector<int>& status_codes,
 		header += "Last-Modified: " + std::string(f_datetime) + "\r\n";
 		header += "Content-Length: " + std::to_string(f_size) + "\r\n";
 		header += "Content-Type: ";
-		if (to_mime.find(f_ext) == to_mime.end()) header += "application/octet-stream\r\n\r\n";
-		else header += to_mime[f_ext] + "\r\n\r\n";
+		if (to_mime.find(f_ext) == to_mime.end()) header += "application/octet-stream\r\n";
+		else header += to_mime[f_ext] + "\r\n";
+		if (should_close_connection) header += "Connection: close\r\n";
+		header += "\r\n";
 
 		// TODO: reliability && limit of sendfile()?
 		int fd = open(absolute_path.c_str(), O_RDONLY);
