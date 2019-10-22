@@ -28,6 +28,9 @@ HttpdServer::HttpdServer(INIReader& t_config)
 		exit(EX_CONFIG);
 	}
 	doc_root = string(realdr);
+	if(doc_root.back() != '/'){
+		doc_root.push_back('/');
+	}
 	free(realdr);
 
 	std::string mmtype = config.Get("httpd", "mime_types", "");
@@ -221,14 +224,15 @@ void HttpdServer::parse_request(const string& req_str, std::vector<string>& urls
 			continue;
 		}
 		if(isNewRequest){
-			auto values = split(line, " ");
-			if(values.size() != 3 || values[0] != "GET" || values[1].empty() || values[1][0] != '/' || values[2] != "HTTP/1.1"){
-				log->error("Bad request initial line: {}", line);
+			// do NOT use split(line, " ") here, need to deal with extra whitespaces in url
+			std::size_t i1 = line.find_first_of(" "), i2 = line.find_last_of(" ");
+			if(i1 == std::string::npos || i2 == std::string::npos || i1 == i2 || line.substr(0, i1) != "GET" || line.substr(i2+1) != "HTTP/1.1" || line[i1+1] != '/'){
+				log->error("Bad request initial line: {}, i1 = {}, i2 = {}", line, i1, i2);
 				urls.push_back(error400page);
 				codes.push_back(400);
 				break;
 			}else{
-				string path = convert_path(values[1]);
+				string path = convert_path(line.substr(i1 + 1, i2 - i1 - 1));
 				if(path.empty()){
 					codes.push_back(404);
 					urls.push_back(error404page);
@@ -293,6 +297,8 @@ string HttpdServer::convert_path(string path) {
 		string ans(abs_path);
 		free(abs_path);
 		if(ans.substr(0, doc_root.size()) != doc_root){
+			// make sure doc_root ended with /, otherwise it may escape doc_root even the above condition holds true
+			// e.g. doc_root = /a/b/c, ans = /a/b/cd
 			// || access(ans.c_str(), F_OK) == -1
 			// file must exist, otherwise realpath() will return NULL
 			// escape root directory
@@ -369,7 +375,7 @@ bool HttpdServer::send_response(int clnt_sock, std::vector<int>& status_codes,
 		auto last_dot_pos = absolute_path.find_last_of(".");
 		if (last_dot_pos == string::npos) last_dot_pos = absolute_path.size();
 		auto last_slash_pos = absolute_path.find_last_of("/");
-		string f_name = absolute_path.substr(last_slash_pos + 1, last_dot_pos);
+		string f_name = absolute_path.substr(last_slash_pos + 1, last_dot_pos - last_slash_pos - 1);
 		string f_ext = absolute_path.substr(last_dot_pos);
 		
 		log->info("File size: {}", f_size);
