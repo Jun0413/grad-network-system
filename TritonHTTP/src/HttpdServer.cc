@@ -155,6 +155,8 @@ void HttpdServer::handle_client(int clnt_sock) {
 			}
 
 			if (bytes_recv <= 0) {
+				log->info("bytes_recv = {}, errno = {}", bytes_recv, errno);
+				if (req_str.size() > 0) break;
 				close(clnt_sock);
 				return;
 			}
