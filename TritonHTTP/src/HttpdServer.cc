@@ -317,7 +317,6 @@ string HttpdServer::convert_path(string path) {
 
 std::vector<string> HttpdServer::split(const string& str, const string& delim){
 	// Split str by delim
-	// Reference: https://stackoverflow.com/a/7408245
 	std::vector<string> res;
 	std::size_t start = 0, end = 0, searchStart = 0;
 	while((end = str.find_first_of(delim, searchStart)) != string::npos){
