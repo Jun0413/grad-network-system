@@ -1,71 +1,83 @@
+from socketserver import ThreadingMixIn
+from threading import Lock
 from xmlrpc.server import SimpleXMLRPCServer
 from xmlrpc.server import SimpleXMLRPCRequestHandler
-from socketserver import ThreadingMixIn
 
+import hashlib
+
+
+""" Threaded XML-RPC Server """
 class RequestHandler(SimpleXMLRPCRequestHandler):
     rpc_paths = ('/RPC2',)
-
 class threadedXMLRPCServer(ThreadingMixIn, SimpleXMLRPCServer):
     pass
 
+
+""" In-Memory Storage """
+# map hash[str] to block[bytes]
+hash_to_block = {}
+# map file_name[str] to info[list]
+# in the info, 1st element is version[int]
+# second element is hashes[ordered list] 
+file_info_map = {}
+
+
 # A simple ping, returns true
 def ping():
-    """A simple ping method"""
     print("Ping()")
     return True
 
+
 # Gets a block, given a specific hash value
 def getblock(h):
-    """Gets a block"""
     print("GetBlock(" + h + ")")
+    return hash_to_block[h]
 
-    blockData = bytes(4)
-    return blockData
 
 # Puts a block
+# TODO: (1) decide if b is bytes (2) return True?
 def putblock(b):
-    """Puts a block"""
     print("PutBlock()")
+    global hash_to_block
+    hash_to_block[sha256(b)] = b
 
-    return True
 
 # Given a list of blocks, return the subset that are on this server
-def hasblocks(blocklist):
-    """Determines which blocks are on this server"""
+# TODO:
+# (1) originally was "blocklist", changed to "hashlist"
+# (2) need to check if it is deleted?
+def hasblocks(hashlist):
     print("HasBlocks()")
+    return [hash for hash in hashlist if hash in hash_to_block]
 
-    return blocklist
+
+def oweblocks(hashlist):
+    print("OweBlocks()")
+    return [hash for hash in hashlist if hash not in hash_to_block]
 
 # Retrieves the server's FileInfoMap
 def getfileinfomap():
-    """Gets the fileinfo map"""
     print("GetFileInfoMap()")
+    return file_info_map
 
-    result = {}
-
-    # file1.dat
-    file1info = []
-    file1info.append(3) # version
-
-    file1blocks = []
-    file1blocks.append("h1")
-    file1blocks.append("h2")
-    file1blocks.append("h3")
-
-    file1info.append(file1blocks)
-    
-    result["file1.dat"] = file1info
-
-    return result
 
 # Update a file's fileinfo entry
-def updatefile(filename, version, blocklist):
-    """Updates a file's fileinfo entry"""
+def updatefile(filename, version, hashlist):
     print("UpdateFile()")
-
+    global file_info_map
+    if filename in file_info_map:
+        if file_info_map[filename][0] >= version:
+            return False
+    file_info_map[filename] = [version, hashlist]
     return True
 
-# PROJECT 3 APIs below
+
+""" Utility Functions """
+def sha256(block):
+    return hashlib.sha256(block).hexdigest()
+
+
+""" PROJECT 3 APIs below """
 
 # Queries whether this metadata store is a leader
 # Note that this call should work even when the server is "crashed"
@@ -73,6 +85,7 @@ def isLeader():
     """Is this metadata store a leader?"""
     print("IsLeader()")
     return True
+
 
 # "Crashes" this metadata store
 # Until Restore() is called, the server should reply to all RPCs
@@ -82,6 +95,7 @@ def crash():
     """Crashes this metadata store"""
     print("Crash()")
     return True
+
 
 # "Restores" this metadata store, allowing it to start responding
 # to and sending RPCs to other nodes
@@ -107,6 +121,7 @@ if __name__ == "__main__":
         server.register_function(getblock,"surfstore.getblock")
         server.register_function(putblock,"surfstore.putblock")
         server.register_function(hasblocks,"surfstore.hasblocks")
+        server.register_function(hasblocks,"surfstore.oweblocks")
         server.register_function(getfileinfomap,"surfstore.getfileinfomap")
         server.register_function(updatefile,"surfstore.updatefile")
 
