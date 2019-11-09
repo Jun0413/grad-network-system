@@ -55,13 +55,13 @@ def get_file_hashlist(file_path, block_size):
 
 def upload_file_blocks(rpc, base_dir, file_name, base_local_index, block_size):
 	file_path = os.path.join(base_dir, file_name)
-	non_existed_hashes = rpc.surfstore.oweblocks((base_local_index[file_name][1]))
+	existed_hashes = rpc.surfstore.hasblocks(base_local_index[file_name][1])
 	hash_index = 0
 	with open(file_path, 'rb') as fp:
 		block = fp.read(block_size)
-		while not block:
-			if base_local_index[file_name][1][hash_index] in non_existed_hashes:
-				rpc.surfstore.putblock(block)
+		while block:
+			if base_local_index[file_name][1][hash_index] not in existed_hashes:
+				rpc.surfstore.putblock(xmlrpc.client.Binary(block))
 			hash_index += 1
 			block = fp.read(block_size)
 
@@ -132,6 +132,7 @@ def sync(rpc, base_dir, block_size):
 			upload_file_blocks(rpc, base_dir, fn, base_local_index, block_size)
 			if rpc.surfstore.updatefile(fn, 1, base_local_index[fn][1]):
 				updated_local_index[fn] = base_local_index[fn]
+				remote_index = get_remote_index(rpc)
 				print('{} uploaded to server'.format(fn))
 			else:
 				download = True
@@ -139,7 +140,6 @@ def sync(rpc, base_dir, block_size):
 			download = True
 		
 		if download: # download file
-			remote_index = get_remote_index(rpc)
 			download_file(rpc, base_dir, fn, remote_index)
 			updated_local_index[fn] = remote_index[fn]
 			print('[warning] failed to upload {} with behind version, \
@@ -165,10 +165,6 @@ if __name__ == "__main__":
 		client  = xmlrpc.client.ServerProxy(args.hostport)
 		if client.surfstore.ping():
 			print("Ping() successful")
-		
-		# sync(client, args.basedir, args.blocksize)
-		
-		""" TEST """
 		sync(client, args.basedir, args.blocksize)
 
 	except Exception as e:

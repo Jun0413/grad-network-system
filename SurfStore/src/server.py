@@ -31,6 +31,8 @@ def ping():
 # Gets a block, given a specific hash value
 def getblock(h):
     print("GetBlock(" + h + ")")
+    if h not in hash_to_block:
+        print(hash_to_block)
     return hash_to_block[h]
 
 
@@ -39,7 +41,8 @@ def getblock(h):
 def putblock(b):
     print("PutBlock()")
     global hash_to_block
-    hash_to_block[sha256(b)] = b
+    hash_to_block[hashlib.sha256(b.data).hexdigest()] = b.data
+    return True
 
 
 # Given a list of blocks, return the subset that are on this server
@@ -50,10 +53,6 @@ def hasblocks(hashlist):
     print("HasBlocks()")
     return [hash for hash in hashlist if hash in hash_to_block]
 
-
-def oweblocks(hashlist):
-    print("OweBlocks()")
-    return [hash for hash in hashlist if hash not in hash_to_block]
 
 # Retrieves the server's FileInfoMap
 def getfileinfomap():
@@ -70,11 +69,6 @@ def updatefile(filename, version, hashlist):
             return False
     file_info_map[filename] = [version, hashlist]
     return True
-
-
-""" Utility Functions """
-def sha256(block):
-    return hashlib.sha256(block).hexdigest()
 
 
 """ PROJECT 3 APIs below """
@@ -121,7 +115,6 @@ if __name__ == "__main__":
         server.register_function(getblock,"surfstore.getblock")
         server.register_function(putblock,"surfstore.putblock")
         server.register_function(hasblocks,"surfstore.hasblocks")
-        server.register_function(hasblocks,"surfstore.oweblocks")
         server.register_function(getfileinfomap,"surfstore.getfileinfomap")
         server.register_function(updatefile,"surfstore.updatefile")
 
