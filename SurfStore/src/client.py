@@ -156,14 +156,16 @@ def sync(rpc, base_dir, block_size):
 				print('{} uploaded to server'.format(fn))
 			else:
 				download = True
+		elif local_version == remote_version:
+			download = (base_local_index[fn][1] != remote_index[fn][1])
+			updated_local_index[fn] = base_local_index[fn]
 		else:
 			download = True
 		
 		if download: # download file
 			download_file(rpc, base_dir, fn, remote_index)
 			updated_local_index[fn] = remote_index[fn]
-			print('[warning] failed to upload {} with behind version, \
-			download from server and override local'.format(fn))
+			print('download {} from server and override local'.format(fn))
 
 	# IV. commit updated_local_index to index.txt
 	commit_local_index(base_dir, updated_local_index)
