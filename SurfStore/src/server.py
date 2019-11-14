@@ -32,7 +32,8 @@ def ping():
 def getblock(h):
     print("GetBlock(" + h + ")")
     if h not in hash_to_block:
-        print(hash_to_block)
+        return None # should not happen
+    print(type(hash_to_block))
     return hash_to_block[h]
 
 
@@ -65,7 +66,7 @@ def updatefile(filename, version, hashlist):
     print("UpdateFile()")
     global file_info_map
     if filename in file_info_map:
-        if file_info_map[filename][0] >= version:
+        if version - file_info_map[filename][0] != 1:
             return False
     file_info_map[filename] = [version, hashlist]
     return True
