@@ -1,0 +1,20 @@
+1. Get file info maps for base, local index and remote index
+2. For base, if files deleted from local, include with zero hash
+    s.t local map becomes a subset of base
+3. Download files from remote which are not found in base
+    (since local now is a subset of base, no need to check existence in local)
+4. Upload files from base to remote which are not in local
+    4.1 file does not exist in neither local or remote, upload with version 1
+    4.2 file does not exist in local but in remote, download with remote_ver + 1
+    4.3 failure in syncing proceeds to download from remote
+        prompt warning message
+5. Handle conflict for files in local
+    5.1 if not modified and behind remote version, download
+    5.2 if modified and same version, upload
+    5.3 if modified and behind version, download
+        prompt warning message
+
+Be careful:
+1. ignore index files
+2. put blocks first, then update file info map
+3. modification invovles local index, file contents and remote file map
