@@ -93,7 +93,8 @@ def isLeader():
 # RPCs to other servers
 def crash():
     """Crashes this metadata store"""
-    print("Crash()")
+    global crashed
+    crashed = True
     return True
 
 
@@ -101,7 +102,8 @@ def crash():
 # to and sending RPCs to other nodes
 def restore():
     """Restores this metadata store"""
-    print("Restore()")
+    global crashed
+    crashed = False
     return True
 
 
@@ -129,7 +131,9 @@ def requestVote(serverid, term, lastLogIndex, lastLogTerm):
 # Updates fileinfomap
 def appendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit):
     """Updates fileinfomap to match that of the leader"""
-    global startTime, status
+    global startTime, status, crashed
+    if crashed:
+        raise Exception('Server crashed')
     startTime = int((round(time.time() * 1000)))
     if prevLogIndex == -1:
         # heartbeat packet
@@ -217,14 +221,15 @@ def startElection():
 # loop forever to monitor timeout
 def main_loop():
     while True:
-        curTime = int((round(time.time() * 1000)))
-        if status != 'Leader' and curTime - startTime > electionTimeout:
-            print('Election timeout occurs')
-            # elect new leader
-            startElection()
-        if status == 'Leader' and curTime - prevHeartbeatTime > heartbeatFreq:
-            print('Send heartbeat packet')
-            sendAppendEntries(-1)
+        if not crashed:
+            curTime = int((round(time.time() * 1000)))
+            if status != 'Leader' and curTime - startTime > electionTimeout:
+                print('Election timeout occurs')
+                # elect new leader
+                startElection()
+            if status == 'Leader' and curTime - prevHeartbeatTime > heartbeatFreq:
+                print('Send heartbeat packet')
+                sendAppendEntries(-1)
         time.sleep(0.05)
 
 
