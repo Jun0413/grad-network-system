@@ -7,7 +7,7 @@ import argparse
 import time
 import random
 import threading
-import queue
+import logging
 
 """ Threaded XML-RPC Server """
 class RequestHandler(SimpleXMLRPCRequestHandler):
@@ -140,12 +140,12 @@ def appendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, leaderComm
     startTime = int((round(time.time() * 1000)))
     if prevLogIndex == -1:
         # heartbeat packet
-        print("Received heartbeat appendEntries")
+        logging.debug("Received heartbeat appendEntries")
         if term >= currentTerm:
             status = 'Follower'
             setTerm(term)
     else:
-        print("Received normal appendEntries from leader")
+        logging.debug("Received normal appendEntries from leader")
         # TODO
     return True
 
@@ -158,7 +158,7 @@ def sendAppendEntries(prevLogIndex):
     # prevLogIndex = -1, heartbeat packet
     global status, prevHeartbeatTime, serverlist, currentTerm, servernum, commitIndex
     if status != 'Leader':
-        print('Only leader can send appendEntries')
+        logging.error('Only leader can send appendEntries')
         return
     prevHeartbeatTime = int((round(time.time() * 1000)))
     for i in range(0, len(serverlist)):
@@ -189,7 +189,7 @@ def becomeLeader():
 def setTerm(newTerm):
     global currentTerm, votedFor
     if newTerm <= currentTerm:
-        print('NewTerm should >= currentTerm')
+        logging.error('NewTerm should >= currentTerm')
         return
     currentTerm = newTerm
     votedFor = -1
@@ -203,7 +203,7 @@ def askForVotes(hostport, index, votes):
         if client.surfstore.requestVote(currentTerm, servernum, len(logs), logs[-1][0]):
             votes.append(index)  # list append is thread safe, no need acquire lock
     except Exception as e:
-        print("Client: " + str(e))
+        logging.error("Client: " + str(e))
 
 
 class electionThread(threading.Thread):
@@ -220,7 +220,7 @@ class electionThread(threading.Thread):
 
     def run(self):
         global status, startTime, currentTerm, electionTimeout, serverlist, currentTerm, servernum, votedFor, votes, lock
-        print('Start new election as ' + status)
+        logging.debug('Start new election thread, status is ' + status)
         with lock:
             # update global status
             startTime = int((round(time.time() * 1000)))
@@ -238,10 +238,12 @@ class electionThread(threading.Thread):
         while True:
             if status != 'Candidate' or currentTerm > term or self.stopped():
                 # other server may become leader in the process
+                logging.debug('Failed to become leader, exit leader election')
                 return
             if len(votes) * 2 > len(serverlist) + 1:
                 # TODO: test even condition?
                 # become leader
+                logging.debug('Successfully elected to be the leader')
                 becomeLeader()
 
 
@@ -252,14 +254,15 @@ def main_loop():
         if not crashed:
             curTime = int((round(time.time() * 1000)))
             if status != 'Leader' and curTime - startTime > electionTimeout:
-                print('Election timeout')
+                logging.debug('Election timeout')
                 # elect new leader
                 if electionTask is not None and electionTask.is_alive():
+                    logging.debug('Previous leader election does not complete, stop it')
                     electionTask.stop()
                 electionTask = electionThread(daemon=True)
                 electionTask.start()
             if status == 'Leader' and curTime - prevHeartbeatTime > heartbeatFreq:
-                print('Send heartbeat packet')
+                logging.debug('Send heartbeat packet')
                 sendAppendEntries(-1)
         time.sleep(0.05)
 
@@ -311,6 +314,7 @@ if __name__ == "__main__":
 
         fileinfomap = dict()
 
+        logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)  # TODO: change level to ERROR before submitting
         # variables for RAFT protocol
         # persistent state on all servers
         currentTerm = 0  # latest term server has seen
@@ -335,10 +339,11 @@ if __name__ == "__main__":
         electionTimeout = random.randint(400, 600)  # in milliseconds TODO: choose appropriate time range
         heartbeatFreq = 250  # in milliseconds
         prevHeartbeatTime = 0
+        logging.debug('Server {0} start'.format(servernum))
 
         lock = threading.Lock()
 
-        print("Attempting to start XML-RPC Server...")
+        logging.debug("Attempting to start XML-RPC Server...")
         server = threadedXMLRPCServer((host, port), requestHandler=RequestHandler)
         server.register_introspection_functions()
         server.register_function(ping,"surfstore.ping")
@@ -355,10 +360,10 @@ if __name__ == "__main__":
         server.register_function(requestVote,"surfstore.requestVote")
         server.register_function(appendEntries,"surfstore.appendEntries")
         server.register_function(tester_getversion,"surfstore.tester_getversion")
-        print("Started successfully.")
-        print("Accepting requests. (Halt program to stop.)")
+        logging.debug("Started successfully.")
+        logging.debug("Accepting requests. (Halt program to stop.)")
         server.serve_forever()
         main_loop()
 
     except Exception as e:
-        print("Server: " + str(e))
+        logging.error("Server: " + str(e))
