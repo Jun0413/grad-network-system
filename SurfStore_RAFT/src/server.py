@@ -6,7 +6,8 @@ import hashlib
 import argparse
 import time
 import random
-
+import threading
+import queue
 
 """ Threaded XML-RPC Server """
 class RequestHandler(SimpleXMLRPCRequestHandler):
@@ -15,6 +16,8 @@ class RequestHandler(SimpleXMLRPCRequestHandler):
 
 class threadedXMLRPCServer(ThreadingMixIn, SimpleXMLRPCServer):
     pass
+
+
 
 
 """ In-Memory Storage """
@@ -152,7 +155,7 @@ def tester_getversion(filename):
 
 
 def sendAppendEntries(prevLogIndex):
-    # prevLogIndex = -1, heartbeat packet, does = 0 work here?
+    # prevLogIndex = -1, heartbeat packet
     global status, prevHeartbeatTime, serverlist, currentTerm, servernum, commitIndex
     if status != 'Leader':
         print('Only leader can send appendEntries')
@@ -174,9 +177,10 @@ def sendAppendEntries(prevLogIndex):
 
 
 def becomeLeader():
-    global status, nextIndex
+    global status, nextIndex, matchIndex, startTime
     status = 'Leader'
-    sendAppendEntries(0)
+    sendAppendEntries(-1)
+    startTime = int((round(time.time() * 1000)))
     # reinitialize variables
     nextIndex = [len(logs)] * len(serverlist)
     matchIndex = [0] * len(serverlist)
@@ -191,42 +195,69 @@ def setTerm(newTerm):
     votedFor = -1
 
 
-def startElection():
-    # from follower to candidate
-    global status, startTime, currentTerm, electionTimeout, serverlist, currentTerm, servernum, votedFor
-    print('Start new election as ' + status)
-    startTime = int((round(time.time() * 1000)))
-    status = 'Candidate'
-    electionTimeout = random.randint(400, 600)
-    setTerm(currentTerm + 1)
-    votedFor = servernum
-    votes = 1
-    # request vote from every other servers, TODO: parallel send request
-    for i in range(0, len(serverlist)):
-        try:
-            client = ServerProxy('http://' + serverlist[i])
-            if client.surfstore.requestVote(currentTerm, servernum, len(logs), logs[-1][0]):
-                votes += 1
-        except Exception as e:
-            print("Client: " + str(e))
-    if status != 'Candidate':
-        # other server may become leader in the process
-        return
-    if votes * 2 > len(serverlist) + 1:
-        # TODO: test even condition?
-        # become leader
-        becomeLeader()
+def askForVotes(hostport, index, votes):
+    # ask server with hostport for vote
+    global logs, currentTerm, servernum
+    try:
+        client = ServerProxy('http://' + hostport)
+        if client.surfstore.requestVote(currentTerm, servernum, len(logs), logs[-1][0]):
+            votes.append(index)  # list append is thread safe, no need acquire lock
+    except Exception as e:
+        print("Client: " + str(e))
+
+
+class electionThread(threading.Thread):
+    # The thread should check stopped() condition regularly
+    def __init__(self,  *args, **kwargs):
+        super(electionThread, self).__init__(*args, **kwargs)
+        self.stop_event = threading.Event()
+
+    def stop(self):
+        self.stop_event.set()
+
+    def stopped(self):
+        return self.stop_event.is_set()
+
+    def run(self):
+        global status, startTime, currentTerm, electionTimeout, serverlist, currentTerm, servernum, votedFor, votes, lock
+        print('Start new election as ' + status)
+        with lock:
+            # update global status
+            startTime = int((round(time.time() * 1000)))
+            status = 'Candidate'
+            electionTimeout = random.randint(400, 600)
+            term = currentTerm + 1
+            setTerm(term)
+            votedFor = servernum
+        votes = [-1] # vote for itself
+        # request vote from every other servers
+        for i in range(0, len(serverlist)):
+            x = threading.Thread(target=askForVotes, args=(serverlist[i], i, votes), daemon=True)
+            x.start()
+        # monitor votes
+        while True:
+            if status != 'Candidate' or currentTerm > term or self.stopped():
+                # other server may become leader in the process
+                return
+            if len(votes) * 2 > len(serverlist) + 1:
+                # TODO: test even condition?
+                # become leader
+                becomeLeader()
 
 
 # loop forever to monitor timeout
 def main_loop():
+    electionTask = None
     while True:
         if not crashed:
             curTime = int((round(time.time() * 1000)))
             if status != 'Leader' and curTime - startTime > electionTimeout:
-                print('Election timeout occurs')
+                print('Election timeout')
                 # elect new leader
-                startElection()
+                if electionTask is not None and electionTask.is_alive():
+                    electionTask.stop()
+                electionTask = electionThread(daemon=True)
+                electionTask.start()
             if status == 'Leader' and curTime - prevHeartbeatTime > heartbeatFreq:
                 print('Send heartbeat packet')
                 sendAppendEntries(-1)
@@ -305,6 +336,7 @@ if __name__ == "__main__":
         heartbeatFreq = 250  # in milliseconds
         prevHeartbeatTime = 0
 
+        lock = threading.Lock()
 
         print("Attempting to start XML-RPC Server...")
         server = threadedXMLRPCServer((host, port), requestHandler=RequestHandler)
