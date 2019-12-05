@@ -64,13 +64,30 @@ def hasblocks(hashlist):
 
 # Retrieves the server's FileInfoMap
 def getfileinfomap():
-    print("GetFileInfoMap()")
-    return file_info_map
+    logging.debug("Receive GetFileInfoMap()")
+    global status, file_info_map
+    if status != 'Leader':
+        raise Exception('Should only call getfileinfomap() on leader')
+    if sendHeartbeatBlocked(5):
+        return file_info_map
+    else:
+        return False # TODO: check here
 
 
-# Update a file's fileinfo entry
+def updateLocal(filename, version, hashlist):
+    global file_info_map
+    logging.debug("Update local file_info_map, filename = {0}, version = {1}".format(filename, version))
+    if filename in file_info_map:
+        if version - file_info_map[filename][0] != 1:
+            return False
+    file_info_map[filename] = [version, hashlist]
+    return True
+
+
+# Update a file's fileinfo entry, RPC call
 def updatefile(filename, version, hashlist):
     logging.debug("Receive UpdateFile({0}, {1})".format(filename, version))
+    global logs, status, commitIndex, lastApplied, currentTerm
     if status != 'Leader':
         raise Exception('Should only call updatefile() on leader')
     logs.append((currentTerm, filename, version, hashlist))
@@ -79,22 +96,29 @@ def updatefile(filename, version, hashlist):
     #         if a majority of the nodes are crashed, should block until a majority recover
     N = len(logs) - 1
     cnt = 1 # number of servers have logs update to logs[N]
-    while cnt * 2 <= len(serverlist) + 1:
+    timeout = 5 # return false if timeout
+    callTime = time.time()
+    while time.time() - callTime < timeout:
         sendAppendEntries(False)
         cnt = 1
         for mid in matchIndex:
             if mid >= N:
                 cnt += 1
+        if cnt * 2 > len(serverlist) + 1 and logs[N][0] == currentTerm:
+            break
+        time.sleep(0.5)
+    if cnt * 2 <= len(serverlist) + 1:
+        # timeout
+        logging.debug("UpdateFile() timeout")
+        return False
     # commit to N
-    
+    result = True
+    for i in range(lastApplied, N + 1):
+        result = result and updateLocal(logs[i][1], logs[i][2], logs[i][3])
+    commitIndex = N
+    lastApplied = N
     sendAppendEntries(False) # ask clients to commit
-    return True
-    # global file_info_map
-    # if filename in file_info_map:
-    #     if version - file_info_map[filename][0] != 1:
-    #         return False
-    # file_info_map[filename] = [version, hashlist]
-    # return True
+    return result
 
 
 # PROJECT 3 APIs below
@@ -166,6 +190,7 @@ def appendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, leaderComm
         logging.debug("Received heartbeat appendEntries")
         status = 'Follower'
         setTerm(term)
+        return True
     else:
         logging.debug("Received normal appendEntries from leader")
         if len(logs) <= prevLogIndex or logs[prevLogIndex][0] != prevLogTerm:
@@ -177,9 +202,14 @@ def appendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, leaderComm
                 break
             entryId += 1
         logs.extend(entries[entryId:])
-        if leaderCommit > commitIndex:
-            # TODO: actually update file
-            commitIndex = min(leaderCommit, len(logs) - 1)
+        if leaderCommit > commitIndex:            
+            N = min(leaderCommit, len(logs) - 1)
+            result = True
+            for i in range(lastApplied, N + 1):
+                result = result and updateLocal(logs[i][1], logs[i][2], logs[i][3])
+            commitIndex = N
+            lastApplied = N
+            return result
     return True
 
 
@@ -187,13 +217,15 @@ def tester_getversion(filename):
     return fileinfomap[filename][0]
 
 
-def sendAppendEntriesSingle(prevLogIndex, index):
+def sendAppendEntriesSingle(prevLogIndex, index, result_list=[]):
     global currentTerm, servernum, commitIndex
     try:
         client = ServerProxy('http://' + serverlist[index])
         if prevLogIndex == -1:
             # heartbeat packet
-            client.surfstore.appendEntries(currentTerm, servernum, prevLogIndex, 0, [], commitIndex)
+            result = client.surfstore.appendEntries(currentTerm, servernum, prevLogIndex, 0, [], commitIndex)
+            if result:
+                result_list(index)
         else:
             # normal append
             result = client.surfstore.appendEntries(currentTerm, servernum, prevLogIndex, logs[prevLogIndex][0],
@@ -207,6 +239,20 @@ def sendAppendEntriesSingle(prevLogIndex, index):
                 sendAppendEntriesSingle(nextIndex[index], index) # retry until succeed  
     except Exception as e:
         logging.error("Client: " + str(e))
+
+
+def sendHeartbeatBlocked(timeout=5):
+    # block until timeout (False) or majority of servers reply true to the heartbeat msg
+    callTime = time.time()
+    while time.time() - callTime < timeout:
+        result_list = []
+        for i in range(0, len(serverlist)):
+            x = threading.Thread(target=sendAppendEntriesSingle, args=(-1, i, result_list), daemon=True)
+            x.start()
+        time.sleep(1) # ugly implementation
+        if len(result_list) + 1 > len(serverlist):
+            return True
+    return False
 
 
 def sendAppendEntries(isHeartbeat):
