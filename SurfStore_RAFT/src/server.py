@@ -121,13 +121,17 @@ def isCrashed():
 def requestVote(serverid, term, lastLogIndex, lastLogTerm):
     """Requests vote to be the leader"""
     global votedFor, crashed
+    logging.debug("Receive request vote from server {0}, server term = {1}, lastLogIndex = {2}, lastLogTerm = {3}".format(serverid, term, lastLogIndex, lastLogIndex))
+
     if crashed:
         raise Exception('Server crashed')  # TODO: is that right to indicate server crash?
     if votedFor != -1 or term < currentTerm or logs[-1][0] > lastLogTerm or (logs[-1][0] == lastLogTerm and len(logs) > lastLogIndex):
         # do we need to return currentTerm here?
+        logging.debug("Refuse to vote")
         return False
     # grant vote to it
     votedFor = serverid
+    logging.debug("Grant vote")
     return True
 
 
@@ -168,7 +172,7 @@ def sendAppendEntriesSingle(prevLogIndex, hostport):
 
         # TODO: handle return value
     except Exception as e:
-        print("Client: " + str(e))
+        logging.error("Client: " + str(e))
 
 
 def sendAppendEntries(prevLogIndex):
@@ -195,8 +199,8 @@ def becomeLeader():
 
 def setTerm(newTerm):
     global currentTerm, votedFor
-    if newTerm <= currentTerm:
-        logging.error('NewTerm should >= currentTerm')
+    if newTerm < currentTerm:
+        logging.error('NewTerm = {0}, smaller than currentTerm = {1}'.format(newTerm, currentTerm))
         return
     currentTerm = newTerm
     votedFor = -1
@@ -205,6 +209,7 @@ def setTerm(newTerm):
 def askForVotes(hostport, index, votes):
     # ask server with hostport for vote
     global logs, currentTerm, servernum
+    logging.debug("Ask for votes from server id = {0}, hostport = {1}".format(index, hostport))
     try:
         client = ServerProxy('http://' + hostport)
         if client.surfstore.requestVote(currentTerm, servernum, len(logs), logs[-1][0]):
@@ -232,7 +237,7 @@ class electionThread(threading.Thread):
             # update global status
             startTime = int((round(time.time() * 1000)))
             status = 'Candidate'
-            electionTimeout = random.randint(400, 600)
+            electionTimeout = random.randint(400, 600) * 10
             term = currentTerm + 1
             setTerm(term)
             votedFor = servernum
@@ -252,10 +257,12 @@ class electionThread(threading.Thread):
                 # become leader
                 logging.debug('Successfully elected to be the leader')
                 becomeLeader()
+                return
 
 
 # loop forever to monitor timeout
 def main_loop():
+    logging.debug('Monitor thread starts')
     electionTask = None
     while True:
         if not crashed:
@@ -321,7 +328,7 @@ if __name__ == "__main__":
 
         fileinfomap = dict()
 
-        logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)  # TODO: change level to ERROR before submitting
+        logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)  # TODO: change level to ERROR before submitting
         # variables for RAFT protocol
         # persistent state on all servers
         currentTerm = 0  # latest term server has seen
@@ -343,8 +350,8 @@ if __name__ == "__main__":
         # time
         random.seed(time.time())
         startTime = int((round(time.time() * 1000)))  # in milliseconds
-        electionTimeout = random.randint(400, 600)  # in milliseconds TODO: choose appropriate time range
-        heartbeatFreq = 250  # in milliseconds
+        electionTimeout = random.randint(400, 600)  * 10# in milliseconds TODO: choose appropriate time range
+        heartbeatFreq = 250  * 10# in milliseconds
         prevHeartbeatTime = 0
         logging.debug('Server {0} start'.format(servernum))
 
@@ -369,8 +376,9 @@ if __name__ == "__main__":
         server.register_function(tester_getversion,"surfstore.tester_getversion")
         logging.debug("Started successfully.")
         logging.debug("Accepting requests. (Halt program to stop.)")
+        monitor_thread = threading.Thread(target=main_loop, daemon=True)
+        monitor_thread.start()
         server.serve_forever()
-        main_loop()
 
     except Exception as e:
         logging.error("Server: " + str(e))
