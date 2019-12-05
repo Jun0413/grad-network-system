@@ -70,13 +70,31 @@ def getfileinfomap():
 
 # Update a file's fileinfo entry
 def updatefile(filename, version, hashlist):
-    print("UpdateFile()")
-    global file_info_map
-    if filename in file_info_map:
-        if version - file_info_map[filename][0] != 1:
-            return False
-    file_info_map[filename] = [version, hashlist]
+    logging.debug("Receive UpdateFile({0}, {1})".format(filename, version))
+    if status != 'Leader':
+        raise Exception('Should only call updatefile() on leader')
+    logs.append((currentTerm, filename, version, hashlist))
+    # paper: respond after entry applied to state machine
+    # project specification: if a majority of the nodes are working, should return the correct answer; 
+    #         if a majority of the nodes are crashed, should block until a majority recover
+    N = len(logs) - 1
+    cnt = 1 # number of servers have logs update to logs[N]
+    while cnt * 2 <= len(serverlist) + 1:
+        sendAppendEntries(False)
+        cnt = 1
+        for mid in matchIndex:
+            if mid >= N:
+                cnt += 1
+    # commit to N
+    
+    sendAppendEntries(False) # ask clients to commit
     return True
+    # global file_info_map
+    # if filename in file_info_map:
+    #     if version - file_info_map[filename][0] != 1:
+    #         return False
+    # file_info_map[filename] = [version, hashlist]
+    # return True
 
 
 # PROJECT 3 APIs below
@@ -86,8 +104,7 @@ def updatefile(filename, version, hashlist):
 # Note that this call should work even when the server is "crashed"
 def isLeader():
     """Is this metadata store a leader?"""
-    print("IsLeader()")
-    return True
+    return status == 'Leader'
 
 
 # "Crashes" this metadata store
@@ -138,19 +155,31 @@ def requestVote(serverid, term, lastLogIndex, lastLogTerm):
 # Updates fileinfomap
 def appendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit):
     """Updates fileinfomap to match that of the leader"""
-    global startTime, status, crashed
+    global startTime, status, crashed, logs, commitIndex
     if crashed:
         raise Exception('Server crashed')
+    if term < currentTerm or status == 'Server':
+        return False
     startTime = int((round(time.time() * 1000)))
     if prevLogIndex == -1:
         # heartbeat packet
         logging.debug("Received heartbeat appendEntries")
-        if term >= currentTerm:
-            status = 'Follower'
-            setTerm(term)
+        status = 'Follower'
+        setTerm(term)
     else:
         logging.debug("Received normal appendEntries from leader")
-        # TODO
+        if len(logs) <= prevLogIndex or logs[prevLogIndex][0] != prevLogTerm:
+            return False
+        entryId = 0
+        for i in range(prevLogIndex + 1, len(logs)):
+            if logs[i][0] != entries[entryId][0]:
+                del logs[i:]
+                break
+            entryId += 1
+        logs.extend(entries[entryId:])
+        if leaderCommit > commitIndex:
+            # TODO: actually update file
+            commitIndex = min(leaderCommit, len(logs) - 1)
     return True
 
 
@@ -158,39 +187,48 @@ def tester_getversion(filename):
     return fileinfomap[filename][0]
 
 
-def sendAppendEntriesSingle(prevLogIndex, hostport):
+def sendAppendEntriesSingle(prevLogIndex, index):
     global currentTerm, servernum, commitIndex
     try:
-        client = ServerProxy('http://' + hostport)
+        client = ServerProxy('http://' + serverlist[index])
         if prevLogIndex == -1:
             # heartbeat packet
             client.surfstore.appendEntries(currentTerm, servernum, prevLogIndex, 0, [], commitIndex)
         else:
             # normal append
-            client.surfstore.appendEntries(currentTerm, servernum, prevLogIndex, logs[prevLogIndex][0],
+            result = client.surfstore.appendEntries(currentTerm, servernum, prevLogIndex, logs[prevLogIndex][0],
                                            logs[prevLogIndex + 1:], commitIndex)
-
-        # TODO: handle return value
+            if result:
+                # append successfully
+                nextIndex[index] = len(logs)
+                matchIndex[index] = len(logs) - 1
+            else:
+                nextIndex[index] -= 1
+                sendAppendEntriesSingle(nextIndex[index], index) # retry until succeed  
     except Exception as e:
         logging.error("Client: " + str(e))
 
 
-def sendAppendEntries(prevLogIndex):
+def sendAppendEntries(isHeartbeat):
     # prevLogIndex = -1, heartbeat packet
-    global status, prevHeartbeatTime, serverlist
+    global status, prevHeartbeatTime, serverlist, nextIndex
     if status != 'Leader':
         logging.error('Only leader can send appendEntries')
         return
     prevHeartbeatTime = int((round(time.time() * 1000)))
-    for addr in serverlist:
-        x = threading.Thread(target=sendAppendEntriesSingle, args=(prevLogIndex, addr), daemon=True)
+    for i in range(0, len(serverlist)):
+        if isHeartbeat:
+            prevLogIndex = -1
+        else:
+            prevLogIndex = nextIndex[i] - 1
+        x = threading.Thread(target=sendAppendEntriesSingle, args=(prevLogIndex, i), daemon=True)
         x.start()
 
 
 def becomeLeader():
     global status, nextIndex, matchIndex, startTime
     status = 'Leader'
-    sendAppendEntries(-1)
+    sendAppendEntries(True)
     startTime = int((round(time.time() * 1000)))
     # reinitialize variables
     nextIndex = [len(logs)] * len(serverlist)
@@ -277,7 +315,7 @@ def main_loop():
                 electionTask.start()
             if status == 'Leader' and curTime - prevHeartbeatTime > heartbeatFreq:
                 logging.debug('Send heartbeat packet')
-                sendAppendEntries(-1)
+                sendAppendEntries(True)
         time.sleep(0.05)
 
 
@@ -334,13 +372,13 @@ if __name__ == "__main__":
         currentTerm = 0  # latest term server has seen
         votedFor = -1  # candidateId that received vote in current term, -1 if none
         logs = []   # log entries, each entry contains cmd for state machine, and term when entry was received by leader
-        # each entry is a tuple (term, cmd, args), index start from 1
-        logs.append((1, '', ['']))
+        # each entry is a tuple (term, filename, version, hashlist), index start from 1
+        logs.append((1, '', '', []))
 
         # volatile state on all servers
         commitIndex = 0  # index of highest log entry known to be committed
         lastApplied = 0  # index of highest log entry applied to state machine
-        status = 'Follower'  # 0 follower, 1 candidate, 2 leader
+        status = 'Follower'  # 'Follower', 'Candidate', 'Leader'
         crashed = False  # is crashed
 
         # volatile state on leaders, reinitialize after election
