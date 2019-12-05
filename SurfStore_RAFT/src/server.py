@@ -154,26 +154,33 @@ def tester_getversion(filename):
     return fileinfomap[filename][0]
 
 
+def sendAppendEntriesSingle(prevLogIndex, hostport):
+    global currentTerm, servernum, commitIndex
+    try:
+        client = ServerProxy('http://' + hostport)
+        if prevLogIndex == -1:
+            # heartbeat packet
+            client.surfstore.appendEntries(currentTerm, servernum, prevLogIndex, 0, [], commitIndex)
+        else:
+            # normal append
+            client.surfstore.appendEntries(currentTerm, servernum, prevLogIndex, logs[prevLogIndex][0],
+                                           logs[prevLogIndex + 1:], commitIndex)
+
+        # TODO: handle return value
+    except Exception as e:
+        print("Client: " + str(e))
+
+
 def sendAppendEntries(prevLogIndex):
     # prevLogIndex = -1, heartbeat packet
-    global status, prevHeartbeatTime, serverlist, currentTerm, servernum, commitIndex
+    global status, prevHeartbeatTime, serverlist
     if status != 'Leader':
         logging.error('Only leader can send appendEntries')
         return
     prevHeartbeatTime = int((round(time.time() * 1000)))
-    for i in range(0, len(serverlist)):
-        try:
-            client = ServerProxy('http://' + serverlist[i])
-            if prevLogIndex == -1:
-                # heartbeat packet
-                client.surfstore.appendEntries(currentTerm, servernum, prevLogIndex, 0, [], commitIndex)
-            else:
-                # normal append
-                client.surfstore.appendEntries(currentTerm, servernum, prevLogIndex, logs[prevLogIndex][0], logs[prevLogIndex+1:], commitIndex)
-
-            # TODO: handle return value
-        except Exception as e:
-            print("Client: " + str(e))
+    for addr in serverlist:
+        x = threading.Thread(target=sendAppendEntriesSingle, args=(prevLogIndex, addr), daemon=True)
+        x.start()
 
 
 def becomeLeader():
