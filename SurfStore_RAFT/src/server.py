@@ -104,10 +104,10 @@ def updatefile(filename, version, hashlist):
         for mid in matchIndex:
             if mid >= N:
                 cnt += 1
-        if cnt * 2 > len(serverlist) + 1 and logs[N][0] == currentTerm:
+        if cnt * 2 > len(serverlist) and logs[N][0] == currentTerm:
             break
         time.sleep(0.5)
-    if cnt * 2 <= len(serverlist) + 1:
+    if cnt * 2 <= len(serverlist):
         # timeout
         logging.debug("UpdateFile() timeout")
         return False
@@ -250,7 +250,7 @@ def sendHeartbeatBlocked(timeout=5):
             x = threading.Thread(target=sendAppendEntriesSingle, args=(-1, i, result_list), daemon=True)
             x.start()
         time.sleep(1) # ugly implementation
-        if len(result_list) + 1 > len(serverlist):
+        if len(result_list) * 2 > len(serverlist):
             return True
     return False
 
@@ -336,7 +336,7 @@ class electionThread(threading.Thread):
                 # other server may become leader in the process
                 logging.debug('Failed to become leader, exit leader election')
                 return
-            if len(votes) * 2 > len(serverlist) + 1:
+            if len(votes) * 2 > len(serverlist):
                 # TODO: test even condition?
                 # become leader
                 logging.debug('Successfully elected to be the leader')
@@ -436,8 +436,8 @@ if __name__ == "__main__":
         # time
         random.seed(time.time())
         startTime = int((round(time.time() * 1000)))  # in milliseconds
-        electionTimeout = random.randint(400, 600)  * time_factor # in milliseconds TODO: choose appropriate time range
-        heartbeatFreq = 250  * time_factor # in milliseconds
+        electionTimeout = random.randint(400, 600) * time_factor # in milliseconds TODO: choose appropriate time range
+        heartbeatFreq = 250 * time_factor # in milliseconds
         prevHeartbeatTime = 0
         logging.debug('Server {0} start'.format(servernum))
 
