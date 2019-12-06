@@ -9,9 +9,7 @@ if __name__ == "__main__":
 
 	try:
 		client  = xmlrpc.client.ServerProxy('http://' + args.hostport)
-		if client.surfstore.updatefile("filename.txt", 1, ["hashlist"]):
-			print("updateFile() successful")
-			print(client.surfstore.getfileinfomap()['filename.txt'])
+		print(client.surfstore.getfileinfomap())
 
 	except Exception as e:
 		print("Client: " + str(e))

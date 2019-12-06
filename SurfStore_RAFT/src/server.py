@@ -68,7 +68,7 @@ def getfileinfomap():
     global status, file_info_map
     if status != 'Leader':
         raise Exception('Should only call getfileinfomap() on leader')
-    if sendHeartbeatBlocked(240):
+    if sendHeartbeatBlocked(120):
         return file_info_map
     else:
         return False # TODO: check here
@@ -96,7 +96,7 @@ def updatefile(filename, version, hashlist):
     #         if a majority of the nodes are crashed, should block until a majority recover
     N = len(logs) - 1
     cnt = 1 # number of servers have logs update to logs[N]
-    timeout = 240 # return false if timeout
+    timeout = 120 # return false if timeout
     callTime = time.time()
     while time.time() - callTime < timeout:
         sendAppendEntries(False)
@@ -170,9 +170,9 @@ def requestVote(term, serverid, lastLogIndex, lastLogTerm):
     if crashed:
         raise Exception('Server crashed')  # TODO: is that right to indicate server crash?
 
-    if term > currentTerm:
-        setTerm(term)
-        status = 'Follower'
+    #if term > currentTerm:
+    setTerm(term)
+    status = 'Follower'
 
     if votedFor != -1 or term < currentTerm or logs[-1][0] > lastLogTerm or (logs[-1][0] == lastLogTerm and len(logs) > lastLogIndex):
         # do we need to return currentTerm here?
