@@ -68,7 +68,7 @@ def getfileinfomap():
     global status, file_info_map
     if status != 'Leader':
         raise Exception('Should only call getfileinfomap() on leader')
-    if sendHeartbeatBlocked(5):
+    if sendHeartbeatBlocked(240):
         return file_info_map
     else:
         return False # TODO: check here
@@ -96,28 +96,31 @@ def updatefile(filename, version, hashlist):
     #         if a majority of the nodes are crashed, should block until a majority recover
     N = len(logs) - 1
     cnt = 1 # number of servers have logs update to logs[N]
-    timeout = 5 # return false if timeout
+    timeout = 240 # return false if timeout
     callTime = time.time()
     while time.time() - callTime < timeout:
         sendAppendEntries(False)
         cnt = 1
+        time.sleep(0.5)
         for mid in matchIndex:
             if mid >= N:
                 cnt += 1
         if cnt * 2 > len(serverlist) + 1 and logs[N][0] == currentTerm:
             break
-        time.sleep(0.5)
     if cnt * 2 <= len(serverlist) + 1:
         # timeout
         logging.debug("UpdateFile() timeout")
         return False
     # commit to N
     result = True
-    for i in range(lastApplied, N + 1):
+    logging.debug("Server commit logs between index [{0}, {1})".format(lastApplied + 1, N + 1))
+    logging.debug(logs)
+    for i in range(lastApplied + 1, N + 1):
         result = result and updateLocal(logs[i][1], logs[i][2], logs[i][3])
     commitIndex = N
     lastApplied = N
     sendAppendEntries(False) # ask clients to commit
+    logging.debug(file_info_map)
     return result
 
 
@@ -161,7 +164,7 @@ def isCrashed():
 # Requests vote from this server to become the leader
 def requestVote(term, serverid, lastLogIndex, lastLogTerm):
     """Requests vote to be the leader"""
-    global votedFor, crashed, currentTerm
+    global votedFor, crashed, currentTerm, status
     logging.debug("Receive request vote from server {0}, server term = {1}, lastLogIndex = {2}, lastLogTerm = {3}".format(serverid, term, lastLogIndex, lastLogIndex))
 
     if crashed:
@@ -184,10 +187,10 @@ def requestVote(term, serverid, lastLogIndex, lastLogTerm):
 # Updates fileinfomap
 def appendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit):
     """Updates fileinfomap to match that of the leader"""
-    global startTime, status, crashed, logs, commitIndex, currentTerm
+    global startTime, status, crashed, logs, commitIndex, currentTerm, lastApplied
     if crashed:
         raise Exception('Server crashed')
-    if term < currentTerm or status == 'Server':
+    if term < currentTerm:
         return False
     if term > currentTerm:
         setTerm(term)
@@ -214,7 +217,7 @@ def appendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, leaderComm
         if leaderCommit > commitIndex:            
             N = min(leaderCommit, len(logs) - 1)
             result = True
-            for i in range(lastApplied, N + 1):
+            for i in range(lastApplied + 1, N + 1):
                 result = result and updateLocal(logs[i][1], logs[i][2], logs[i][3])
             commitIndex = N
             lastApplied = N
@@ -223,7 +226,11 @@ def appendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, leaderComm
 
 
 def tester_getversion(filename):
-    return fileinfomap[filename][0]
+    logging.debug("tester_getversion({0})".format(filename))
+    if filename in file_info_map:
+        return file_info_map[filename][0]
+    else:
+        return 0
 
 
 def sendAppendEntriesSingle(prevLogIndex, index, result_list=[]):
@@ -245,7 +252,7 @@ def sendAppendEntriesSingle(prevLogIndex, index, result_list=[]):
                 matchIndex[index] = len(logs) - 1
             else:
                 nextIndex[index] -= 1
-                sendAppendEntriesSingle(nextIndex[index], index) # retry until succeed  
+                sendAppendEntriesSingle(nextIndex[index] - 1, index) # retry until succeed  
     except Exception as e:
         logging.error("Client: " + str(e))
 
@@ -283,11 +290,11 @@ def sendAppendEntries(isHeartbeat):
 def becomeLeader():
     global status, nextIndex, matchIndex, startTime
     status = 'Leader'
-    sendAppendEntries(True)
     startTime = int((round(time.time() * 1000)))
     # reinitialize variables
     nextIndex = [len(logs)] * len(serverlist)
     matchIndex = [0] * len(serverlist)
+    sendAppendEntries(False)
 
     
 
@@ -371,7 +378,7 @@ def main_loop():
                 electionTask.start()
             if status == 'Leader' and curTime - prevHeartbeatTime > heartbeatFreq:
                 logging.debug('Send heartbeat packet')
-                sendAppendEntries(True)
+                sendAppendEntries(False)
         time.sleep(0.05)
 
 
@@ -431,7 +438,7 @@ if __name__ == "__main__":
         votedFor = -1  # candidateId that received vote in current term, -1 if none
         logs = []   # log entries, each entry contains cmd for state machine, and term when entry was received by leader
         # each entry is a tuple (term, filename, version, hashlist), index start from 1
-        logs.append((1, '', '', []))
+        logs.append((1, '', 0, []))
 
         # volatile state on all servers
         commitIndex = 0  # index of highest log entry known to be committed
