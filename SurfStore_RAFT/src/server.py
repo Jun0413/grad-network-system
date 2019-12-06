@@ -128,7 +128,7 @@ def updatefile(filename, version, hashlist):
 # Note that this call should work even when the server is "crashed"
 def isLeader():
     """Is this metadata store a leader?"""
-    return status == 'Leader'
+    return status == 'Leader' and not crashed
 
 
 # "Crashes" this metadata store
