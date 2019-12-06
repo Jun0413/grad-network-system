@@ -225,7 +225,7 @@ def sendAppendEntriesSingle(prevLogIndex, index, result_list=[]):
             # heartbeat packet
             result = client.surfstore.appendEntries(currentTerm, servernum, prevLogIndex, 0, [], commitIndex)
             if result:
-                result_list(index)
+                result_list.append(index)
         else:
             # normal append
             result = client.surfstore.appendEntries(currentTerm, servernum, prevLogIndex, logs[prevLogIndex][0],
@@ -315,13 +315,13 @@ class electionThread(threading.Thread):
         return self.stop_event.is_set()
 
     def run(self):
-        global status, startTime, currentTerm, electionTimeout, serverlist, currentTerm, servernum, votedFor, votes, lock
+        global status, time_factor, startTime, currentTerm, electionTimeout, serverlist, currentTerm, servernum, votedFor, votes, lock
         logging.debug('Start new election thread, status is ' + status)
         with lock:
             # update global status
             startTime = int((round(time.time() * 1000)))
             status = 'Candidate'
-            electionTimeout = random.randint(400, 600) * 10
+            electionTimeout = random.randint(400, 600) * time_factor
             term = currentTerm + 1
             setTerm(term)
             votedFor = servernum
@@ -413,6 +413,8 @@ if __name__ == "__main__":
         fileinfomap = dict()
 
         logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)  # TODO: change level to ERROR before submitting
+        
+        time_factor = 10 # 10 for debug, 1 for production
         # variables for RAFT protocol
         # persistent state on all servers
         currentTerm = 0  # latest term server has seen
@@ -434,8 +436,8 @@ if __name__ == "__main__":
         # time
         random.seed(time.time())
         startTime = int((round(time.time() * 1000)))  # in milliseconds
-        electionTimeout = random.randint(400, 600)  * 10# in milliseconds TODO: choose appropriate time range
-        heartbeatFreq = 250  * 10# in milliseconds
+        electionTimeout = random.randint(400, 600)  * time_factor # in milliseconds TODO: choose appropriate time range
+        heartbeatFreq = 250  * time_factor # in milliseconds
         prevHeartbeatTime = 0
         logging.debug('Server {0} start'.format(servernum))
 
