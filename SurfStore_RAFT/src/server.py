@@ -159,13 +159,18 @@ def isCrashed():
 
 
 # Requests vote from this server to become the leader
-def requestVote(serverid, term, lastLogIndex, lastLogTerm):
+def requestVote(term, serverid, lastLogIndex, lastLogTerm):
     """Requests vote to be the leader"""
-    global votedFor, crashed
+    global votedFor, crashed, currentTerm
     logging.debug("Receive request vote from server {0}, server term = {1}, lastLogIndex = {2}, lastLogTerm = {3}".format(serverid, term, lastLogIndex, lastLogIndex))
 
     if crashed:
         raise Exception('Server crashed')  # TODO: is that right to indicate server crash?
+
+    if term > currentTerm:
+        setTerm(term)
+        status = 'Follower'
+
     if votedFor != -1 or term < currentTerm or logs[-1][0] > lastLogTerm or (logs[-1][0] == lastLogTerm and len(logs) > lastLogIndex):
         # do we need to return currentTerm here?
         logging.debug("Refuse to vote")
@@ -179,11 +184,15 @@ def requestVote(serverid, term, lastLogIndex, lastLogTerm):
 # Updates fileinfomap
 def appendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit):
     """Updates fileinfomap to match that of the leader"""
-    global startTime, status, crashed, logs, commitIndex
+    global startTime, status, crashed, logs, commitIndex, currentTerm
     if crashed:
         raise Exception('Server crashed')
     if term < currentTerm or status == 'Server':
         return False
+    if term > currentTerm:
+        setTerm(term)
+        status = 'Follower'
+
     startTime = int((round(time.time() * 1000)))
     if prevLogIndex == -1:
         # heartbeat packet
@@ -280,6 +289,7 @@ def becomeLeader():
     nextIndex = [len(logs)] * len(serverlist)
     matchIndex = [0] * len(serverlist)
 
+    
 
 def setTerm(newTerm):
     global currentTerm, votedFor
