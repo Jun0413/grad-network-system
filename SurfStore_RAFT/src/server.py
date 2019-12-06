@@ -104,10 +104,10 @@ def updatefile(filename, version, hashlist):
         for mid in matchIndex:
             if mid >= N:
                 cnt += 1
-        if cnt * 2 > len(serverlist) and logs[N][0] == currentTerm:
+        if cnt * 2 > len(serverlist) + 1 and logs[N][0] == currentTerm:
             break
         time.sleep(0.5)
-    if cnt * 2 <= len(serverlist):
+    if cnt * 2 <= len(serverlist) + 1:
         # timeout
         logging.debug("UpdateFile() timeout")
         return False
@@ -245,12 +245,12 @@ def sendHeartbeatBlocked(timeout=5):
     # block until timeout (False) or majority of servers reply true to the heartbeat msg
     callTime = time.time()
     while time.time() - callTime < timeout:
-        result_list = []
+        result_list = [1]
         for i in range(0, len(serverlist)):
             x = threading.Thread(target=sendAppendEntriesSingle, args=(-1, i, result_list), daemon=True)
             x.start()
         time.sleep(1) # ugly implementation
-        if len(result_list) * 2 > len(serverlist):
+        if len(result_list) * 2 > len(serverlist) + 1:
             return True
     return False
 
@@ -336,7 +336,7 @@ class electionThread(threading.Thread):
                 # other server may become leader in the process
                 logging.debug('Failed to become leader, exit leader election')
                 return
-            if len(votes) * 2 > len(serverlist):
+            if len(votes) * 2 > len(serverlist) + 1:
                 # TODO: test even condition?
                 # become leader
                 logging.debug('Successfully elected to be the leader')
