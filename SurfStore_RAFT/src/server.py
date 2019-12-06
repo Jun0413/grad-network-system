@@ -68,7 +68,7 @@ def getfileinfomap():
     global status, file_info_map
     if status != 'Leader':
         raise Exception('Should only call getfileinfomap() on leader')
-    if sendHeartbeatBlocked(120):
+    if sendHeartbeatBlocked(15):
         return file_info_map
     else:
         return False # TODO: check here
@@ -96,7 +96,7 @@ def updatefile(filename, version, hashlist):
     #         if a majority of the nodes are crashed, should block until a majority recover
     N = len(logs) - 1
     cnt = 1 # number of servers have logs update to logs[N]
-    timeout = 120 # return false if timeout
+    timeout = 15 # return false if timeout
     callTime = time.time()
     while time.time() - callTime < timeout:
         sendAppendEntries(False)
@@ -431,7 +431,7 @@ if __name__ == "__main__":
 
         logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)  # TODO: change level to ERROR before submitting
         
-        time_factor = 10 # 10 for debug, 1 for production
+        time_factor = 1 # 10 for debug, 1 for production
         # variables for RAFT protocol
         # persistent state on all servers
         currentTerm = 0  # latest term server has seen
